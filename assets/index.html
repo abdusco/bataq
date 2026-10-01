@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#122c29" />
+    <meta name="description" content="A little table for good company. Play real-time Batak with friends." />
+    <script>
+      // Apply the saved appearance before the stylesheet paints.
+      {
+        let theme = "system";
+        try {
+          const saved = localStorage.getItem("bataq.theme");
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch {}
+        document.documentElement.dataset.theme = theme;
+        const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#101d1a" : "#f5f3eb";
+      }
+    </script>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="/vendor/qrcode.js"></script>
+    <script type="module" src="/main.js"></script>
+    <title>Bataq — Take your seat.</title>
+  </head>
+  <body x-data="bataq">
+    <header class="masthead" :inert="rulesOpen || shareOpen || settingsOpen">
+      <a class="brand" href="/" @click.prevent="room ? (shareOpen = !shareOpen) : null"
+        ><span class="brand-mark">♠</span> bataq<span class="brand-dot">.</span></a
+      >
+      <div class="header-right">
+        <button class="text-button rules-button" @click="rulesOpen = true">
+          <span x-text="t('How to play')">How to play</span>
+          <span>↗</span></button
+        ><span class="connection" :class="connection" x-text="connectionLabel">Connecting</span>
+        <button
+          class="menu-button"
+          x-ref="menuTrigger"
+          @click="openSettings()"
+          :aria-label="t('Open menu')"
+          aria-haspopup="dialog"
+          :aria-expanded="settingsOpen"
+        >
+          ☰
+        </button>
+      </div>
+    </header>
+
+    <main :inert="rulesOpen || shareOpen || settingsOpen">
+      <section class="welcome" x-show="!room" x-cloak>
+        <div class="welcome-copy">
+          <div class="eyebrow">
+            <span class="tiny-spark">✳</span>
+            <span x-text="t('FOUR SEATS. GOOD COMPANY.')">FOUR SEATS. GOOD COMPANY.</span>
+          </div>
+          <h1><span x-text="t('Take your')">Take your</span><br /><span x-text="t('seat')">seat</span><span class="serif-dot">.</span></h1>
+          <p class="intro">
+            <span x-text="t('A familiar game. A fresh table.')">A familiar game. A fresh table.</span><br /><span x-text="t('Win the auction. Make your move.')"
+              >Win the auction. Make your move.</span
+            >
+          </p>
+          <div class="welcome-notes"><span x-text="t('♠ İhaleli Batak')">♠ İhaleli Batak</span></div>
+        </div>
+        <div class="welcome-right">
+          <div class="hero-cards" aria-hidden="true">
+            <div class="hero-card back-card"><span>✳</span></div>
+            <div class="hero-card ace-card">
+              <span>A<small>♠</small></span
+              ><b>♠</b><span class="upside">A<small>♠</small></span>
+            </div>
+          </div>
+          <form class="join-card" @submit.prevent="join()">
+            <div class="eyebrow" x-show="roomCode" x-text="t('YOU’RE INVITED')"></div>
+            <h2 x-text="roomCode ? t('Join your friends.') : t('Let’s play.')"></h2>
+            <label for="name" x-text="t('What should we call you?')">What should we call you?</label
+            ><input
+              id="name"
+              x-model="name"
+              maxlength="24"
+              :placeholder="t('Your name')"
+              autocomplete="nickname"
+              required
+              :disabled="pending || restoring"
+            /><label for="room-code"><span x-text="t('Room code')">Room code</span> <span class="muted" x-text="t('optional')">optional</span></label
+            ><input
+              id="room-code"
+              x-model="roomCode"
+              maxlength="12"
+              :placeholder="t('Leave blank to create a table')"
+              autocapitalize="characters"
+              :disabled="pending || restoring"
+            /><button class="primary wide" type="submit" :disabled="pending || restoring">
+              <span
+                x-text="restoring ? t('Finding your seat…') : pending ? t('Taking your seat…') : roomCode ? t('Join the table') : t('Create a table')"
+              ></span
+              ><span>↗</span>
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section class="room-shell" :class="{'auction-phase': room?.phase === phases.BIDDING || room?.phase === phases.TRUMP}" x-show="room" x-cloak>
+        <div class="room-heading">
+          <div>
+            <div class="eyebrow">
+              <span x-text="t('YOUR PRIVATE TABLE')">YOUR PRIVATE TABLE</span>
+              <span x-text="room?.id"></span>
+            </div>
+            <h1
+              class="room-title"
+              x-text="room?.phase === phases.LOBBY ? t('Room for your people.') : room?.phase === phases.FINISHED ? t('A table well played.') : t('Make your move.')"
+            ></h1>
+          </div>
+          <button class="outline" @click="shareOpen = true">
+            <span x-text="t('Invite friends')">Invite friends</span>
+            <span>↗</span>
+          </button>
+        </div>
+        <div class="game-layout">
+          <div class="table-panel">
+            <div class="table-topline">
+              <span x-text="room?.phase === phases.LOBBY ? t('Waiting for players') : t('ROUND {round} / 5', {round:room?.round})"></span>
+            </div>
+            <div class="table" :class="{'lobby-table': room?.phase === phases.LOBBY}">
+              <template x-for="position in [0,1,2,3]" :key="position"
+                ><div class="seat" :class="'seat-' + position">
+                  <template x-if="relativePlayer(position)"
+                    ><div
+                      class="player"
+                      :class="{'active-player': isTurn(relativeSeat(position)), 'offline-player': !relativePlayer(position).online && !relativePlayer(position).bot}"
+                    >
+                      <div class="avatar" :class="'avatar-' + relativeSeat(position)">
+                        <span x-text="relativePlayer(position).name.slice(0,1).toUpperCase()"></span
+                        ><i :class="{'is-online': relativePlayer(position).online || relativePlayer(position).bot}"></i>
+                      </div>
+                      <div>
+                        <strong x-text="relativePlayer(position).name + (position === 0 ? t(' (you)') : '')"></strong
+                        ><small x-text="playerDetail(relativePlayer(position))"></small>
+                      </div></div></template
+                  ><template x-if="!relativePlayer(position)"
+                    ><div class="empty-seat"><span>+</span><small x-text="t('Open seat')">Open seat</small></div></template
+                  >
+                </div></template
+              >
+              <div class="table-center" x-show="room?.phase === phases.LOBBY">
+                <span class="table-emblem">♠</span>
+                <h3 x-text="t('Better together.')">Better together.</h3>
+                <p>
+                  <span x-text="t('Invite your friends, or add')">Invite your friends, or add</span><br /><span x-text="t('practice partners to get started.')"
+                    >practice partners to get started.</span
+                  >
+                </p>
+                <span class="seat-count" x-text="t('{count} of 4 seats taken', {count:room?.players.length || 0})"></span>
+              </div>
+              <div class="trick-area" x-show="room?.phase !== phases.LOBBY">
+                <div class="trick-watermark">♠</div>
+                <template x-for="played in (room?.trick || [])" :key="played.seat"
+                  ><div
+                    class="playing-card table-card"
+                    :class="{['played-' + positionOf(played.seat)]: true, 'red-card': isRed(played.card), 'winning-card': room.phase === phases.TRICK && played.seat === room.winner}"
+                  >
+                    <span class="corner"><b x-text="rank(played.card)"></b><i x-text="suit(played.card)"></i></span
+                    ><span class="card-symbol" x-text="suit(played.card)"></span
+                    ><span class="corner reverse"><b x-text="rank(played.card)"></b><i x-text="suit(played.card)"></i></span></div
+                ></template>
+              </div>
+            </div>
+            <div class="turn-strip" aria-live="polite">
+              <span class="turn-spark" :class="{'your-turn': myTurn}">✳</span>
+              <div><strong x-text="statusTitle"></strong><small x-text="statusDetail"></small></div>
+              <span class="trump-chip" x-show="room?.trump >= 0" x-text="trumpLabel + (room?.broken ? t(' · open') : t(' · closed'))"></span>
+            </div>
+          </div>
+          <aside class="side-panel">
+            <div class="panel-card" x-show="room?.phase === phases.LOBBY">
+              <div class="eyebrow" x-text="t('PASS IT AROUND')">PASS IT AROUND</div>
+              <h2><span x-text="t('Good games start')">Good games start</span><br /><span x-text="t('with an invitation.')">with an invitation.</span></h2>
+              <div class="qr-box" x-ref="lobbyQR"></div>
+              <label for="lobby-link" x-text="t('Your table link')">Your table link</label>
+              <div class="copy-field">
+                <input id="lobby-link" :value="shareURL" readonly @click="$el.select()" /><button
+                  @click="copyLink()"
+                  :aria-label="copied ? t('Link copied') : t('Copy room link')"
+                  x-text="copied ? '✓' : '↗'"
+                ></button>
+              </div>
+              <button class="primary wide" x-show="you === room?.host" :disabled="!ready || pending || room?.players.length !== 4" @click="act(actions.START)">
+                <span x-text="t('Deal the cards')">Deal the cards</span>
+                <span>→</span></button
+              ><button
+                class="outline wide"
+                x-show="you === room?.host && room?.players.length < 4"
+                :disabled="!ready || pending"
+                @click="act(actions.ADD_BOTS)"
+                x-text="t('Fill empty seats with bots')"
+              >
+                Fill empty seats with bots
+              </button>
+              <p class="muted small" x-show="you !== room?.host" x-text="t('The host will deal when everyone is here.')">
+                The host will deal when everyone is here.
+              </p>
+            </div>
+            <div class="panel-card" x-show="room?.phase === phases.BIDDING">
+              <div class="eyebrow" x-text="t('CALL YOUR SHOT')">CALL YOUR SHOT</div>
+              <h2 x-text="t('What’s your bid?')">What’s your bid?</h2>
+              <p class="muted">
+                <span x-text="t('Raise the auction or pass.')">Raise the auction or pass.</span><br /><span x-text="t('The winner chooses trump.')"
+                  >The winner chooses trump.</span
+                >
+              </p>
+              <div class="bid-control">
+                <button @click="bid = Math.max(minBid, bid - 1)" :disabled="!myTurn" :aria-label="t('Decrease bid')">−</button><span x-text="bid"></span
+                ><button @click="bid = Math.min(13, bid + 1)" :disabled="!myTurn" :aria-label="t('Increase bid')">+</button>
+              </div>
+              <input
+                class="bid-range"
+                type="range"
+                :min="minBid"
+                max="13"
+                x-model.number="bid"
+                :disabled="!myTurn"
+                :aria-label="t('Number of tricks to bid')"
+              /><button class="primary wide" :disabled="!myTurn || pending" @click="act(actions.BID, {bid})">
+                <span x-text="myTurn ? t('Bid {bid} tricks', {bid}) : t('Waiting for your turn')"></span><span>→</span></button
+              ><button class="outline wide pass-button" :disabled="!myTurn || pending" @click="act(actions.BID, {bid:0})" x-text="t('Pass this auction')">
+                Pass this auction
+              </button>
+            </div>
+            <div class="panel-card trump-picker" x-show="room?.phase === phases.TRUMP">
+              <div class="eyebrow" x-text="t('THE AUCTION IS WON')">THE AUCTION IS WON</div>
+              <h2 x-text="myTurn ? t('Choose your trump.') : t('Trump is on its way.')"></h2>
+              <p class="muted" x-text="t('{name} won at {bid} tricks.', {name:room?.players[room?.bidder]?.name || '',bid:room?.highBid})"></p>
+              <div class="suit-options">
+                <template x-for="(symbol,index) in ['♠','♥','♦','♣']" :key="index"
+                  ><button
+                    :class="{'red-ink': index === suits.HEARTS || index === suits.DIAMONDS}"
+                    :disabled="!myTurn || pending"
+                    @click="act(actions.TRUMP, {suit:index})"
+                    :aria-label="t('Choose {suit} as trump', {suit:t(['spades','hearts','diamonds','clubs'][index])})"
+                    x-text="symbol"
+                  ></button
+                ></template>
+              </div>
+            </div>
+            <div class="panel-card scores" x-show="room?.phase !== phases.LOBBY">
+              <div class="eyebrow" x-text="t('THE SCOREBOARD')">THE SCOREBOARD</div>
+              <div class="score-header">
+                <span x-text="t('PLAYER')">PLAYER</span><span x-text="t('BID / TAKEN')">BID / TAKEN</span><span x-text="t('PTS')">PTS</span>
+              </div>
+              <template x-for="(player, index) in (room?.players || [])" :key="player.id"
+                ><div class="score-row" :class="{'self-row': index === you}">
+                  <span><i class="score-dot" :class="'avatar-' + index"></i><span x-text="player.name"></span></span
+                  ><span
+                    x-text="room?.phase === phases.BIDDING ? player.passed ? t('Pass') : player.bid || '—' : (player.bid || '—') + ' / ' + player.tricks"
+                  ></span
+                  ><strong x-text="player.score"></strong></div
+              ></template>
+              <p class="small muted score-note">
+                <span x-text="t('Bidder must make the contract.')">Bidder must make the contract.</span><br /><span
+                  x-text="t('Everyone else must take at least one.')"
+                  >Everyone else must take at least one.</span
+                ><br /><span x-text="t('Success: +tricks. Failure: −contract.')">Success: +tricks. Failure: −contract.</span>
+              </p>
+            </div>
+            <div class="panel-card last-trick" x-show="room?.lastTrick?.length && room?.phase === phases.PLAYING">
+              <div class="eyebrow" x-text="t('LAST TRICK')">LAST TRICK</div>
+              <div class="mini-trick">
+                <template x-for="play in (room?.lastTrick || [])" :key="play.seat"
+                  ><div>
+                    <span :class="{'red-ink': isRed(play.card)}" x-text="rank(play.card) + suit(play.card)"></span
+                    ><small x-text="room.players[play.seat].name"></small></div
+                ></template>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <section class="hand-panel" x-show="hand.length">
+          <div class="hand-heading">
+            <span class="eyebrow"
+              ><span x-text="t('YOUR HAND')">YOUR HAND</span> <span class="muted" x-text="t('· {count} cards', {count:hand.length})"></span></span
+            ><span
+              class="small muted"
+              x-text="myTurn && room?.phase === phases.PLAYING ? t('Choose a highlighted card') : t('Only you can see these cards')"
+            ></span>
+          </div>
+          <div class="hand">
+            <template x-for="card in hand" :key="card.suit + '-' + card.rank"
+              ><button
+                class="playing-card hand-card"
+                :class="{'red-card': isRed(card), 'playable': canPlay(card)}"
+                :disabled="!canPlay(card) || pending"
+                @click="act(actions.PLAY, {card})"
+                :aria-label="cardLabel(card)"
+              >
+                <span class="corner"><b x-text="rank(card)"></b><i x-text="suit(card)"></i></span><span class="card-symbol" x-text="suit(card)"></span
+                ><span class="corner reverse"><b x-text="rank(card)"></b><i x-text="suit(card)"></i></span></button
+            ></template>
+          </div>
+        </section>
+        <section class="results panel-card" x-show="room?.phase === phases.ROUND || room?.phase === phases.FINISHED">
+          <div>
+            <div class="eyebrow" x-text="room?.phase === phases.FINISHED ? t('THAT’S A WRAP') : t('ONE HAND DOWN')"></div>
+            <h2
+              x-text="room?.phase === phases.FINISHED ? t('{name} takes the table.', {name:champion}) : t('Round {round} complete.', {round:room?.round})"
+            ></h2>
+          </div>
+          <div class="round-history">
+            <template x-for="result in (room?.history || [])" :key="result.round"
+              ><div class="history-row">
+                <span x-text="'R' + result.round"></span
+                ><template x-for="(points,index) in result.points" :key="index"
+                  ><span><small x-text="room.players[index].name"></small><b x-text="(points > 0 ? '+' : '') + points"></b></span
+                ></template></div
+            ></template>
+          </div>
+          <button
+            class="primary"
+            x-show="you === room?.host"
+            :disabled="pending || !ready"
+            @click="act(room.phase === phases.FINISHED ? actions.REMATCH : actions.NEXT)"
+          >
+            <span x-text="room?.phase === phases.FINISHED ? t('Play again') : t('Deal next round')"></span>
+            →
+          </button>
+          <p class="muted" x-show="you !== room?.host" x-text="t('Waiting for the host to deal.')">Waiting for the host to deal.</p>
+        </section>
+      </section>
+    </main>
+    <footer :inert="rulesOpen || shareOpen || settingsOpen">
+      <span><span x-text="t('Made for the next hand.')">Made for the next hand.</span> <span class="footer-suit">♠</span></span>
+    </footer>
+    <div
+      class="menu-backdrop"
+      x-show="settingsOpen"
+      x-cloak
+      x-transition.opacity
+      @click.self="closeSettings()"
+      @keydown.escape.window="settingsOpen && closeSettings()"
+    >
+      <aside class="settings-drawer" x-ref="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="menu-title" @keydown.tab="trapMenuFocus($event)">
+        <div class="drawer-heading">
+          <div>
+            <div class="eyebrow" x-text="t('Make it yours.')"></div>
+            <h2 id="menu-title" x-text="t('Menu')"></h2>
+          </div>
+          <button class="menu-button" x-ref="menuClose" @click="closeSettings()" :aria-label="t('Close menu')">×</button>
+        </div>
+        <fieldset class="setting-options theme-options">
+          <legend x-text="t('Appearance')"></legend>
+          <label :class="{'selected-option': themePreference === 'light'}">
+            <input type="radio" name="theme" value="light" :checked="themePreference === 'light'" @change="setTheme('light')" />
+            <span x-text="t('Light')"></span>
+          </label>
+          <label :class="{'selected-option': themePreference === 'dark'}">
+            <input type="radio" name="theme" value="dark" :checked="themePreference === 'dark'" @change="setTheme('dark')" />
+            <span x-text="t('Dark')"></span>
+          </label>
+          <label :class="{'selected-option': themePreference === 'system'}">
+            <input type="radio" name="theme" value="system" :checked="themePreference === 'system'" @change="setTheme('system')" />
+            <span><strong x-text="t('System')"></strong><small x-text="t('Follows your device appearance.')"></small></span>
+          </label>
+        </fieldset>
+        <fieldset class="setting-options">
+          <legend x-text="t('Language')"></legend>
+          <label :class="{'selected-option': languagePreference === 'auto'}">
+            <input type="radio" name="language" value="auto" :checked="languagePreference === 'auto'" @change="setLanguage('auto')" />
+            <span><strong x-text="t('Browser default')"></strong><small x-text="browserLanguageLabel"></small></span>
+          </label>
+          <label :class="{'selected-option': languagePreference === 'en'}">
+            <input type="radio" name="language" value="en" :checked="languagePreference === 'en'" @change="setLanguage('en')" />
+            <span lang="en">English</span>
+          </label>
+          <label :class="{'selected-option': languagePreference === 'tr'}">
+            <input type="radio" name="language" value="tr" :checked="languagePreference === 'tr'" @change="setLanguage('tr')" />
+            <span lang="tr">Türkçe</span>
+          </label>
+          <p class="small muted" x-text="t('Saved on this device.')"></p>
+        </fieldset>
+        <div class="drawer-links">
+          <button class="outline wide" @click="settingsOpen = false; rulesOpen = true" x-text="t('How to play')"></button>
+          <button class="outline wide" x-show="room" @click="settingsOpen = false; shareOpen = true" x-text="t('Invite friends')"></button>
+          <button class="primary wide" x-show="installPrompt" @click="install()" x-text="t('Install ↧')"></button>
+        </div>
+      </aside>
+    </div>
+    <div class="toast" x-show="error" x-cloak role="alert">
+      <span x-text="error"></span><button @click="error = ''" :aria-label="t('Dismiss message')">×</button>
+    </div>
+    <div
+      class="modal-backdrop"
+      x-show="shareOpen && room"
+      x-cloak
+      x-transition.opacity
+      @click.self="shareOpen = false"
+      @keydown.escape.window="shareOpen = false"
+    >
+      <section class="modal panel-card" role="dialog" aria-modal="true" aria-labelledby="share-title">
+        <button class="close" @click="shareOpen = false" :aria-label="t('Close invitation')">×</button>
+        <div class="eyebrow" x-text="t('THERE’S A SEAT FOR THEM')">THERE’S A SEAT FOR THEM</div>
+        <h2 id="share-title" x-text="t('Invite your people.')">Invite your people.</h2>
+        <div class="qr-box" x-ref="shareQR"></div>
+        <label for="share-link" x-text="t('Share this link')">Share this link</label>
+        <div class="copy-field">
+          <input id="share-link" :value="shareURL" readonly @click="$el.select()" /><button
+            @click="copyLink()"
+            :aria-label="t('Copy room link')"
+            x-text="copied ? '✓' : '↗'"
+          ></button>
+        </div>
+        <button class="primary wide" @click="share()" x-text="t('Share invitation ↗')">Share invitation ↗</button>
+      </section>
+    </div>
+    <div class="modal-backdrop" x-show="rulesOpen" x-cloak x-transition.opacity @click.self="rulesOpen = false" @keydown.escape.window="rulesOpen = false">
+      <section class="modal panel-card rules" role="dialog" aria-modal="true" aria-labelledby="rules-title">
+        <button class="close" @click="rulesOpen = false" :aria-label="t('Close rules')">×</button>
+        <div class="eyebrow" x-text="t('A QUICK REFRESHER')">A QUICK REFRESHER</div>
+        <h2 id="rules-title" x-text="t('Bid. Choose. Take.')">Bid. Choose. Take.</h2>
+        <p x-text="t('Four players. Thirteen cards each. Five rounds. İhaleli Batak: win the auction to choose trump.')">
+          Four players. Thirteen cards each. Five rounds. İhaleli Batak: win the auction to choose trump.
+        </p>
+        <ol>
+          <li>
+            <strong x-text="t('Open at 5–13 tricks.')">Open at 5–13 tricks.</strong>
+            <span
+              x-text="t('Raise the highest bid or pass permanently. The last bidder wins; a bid of 13 wins immediately. If everyone passes, the first bidder takes a contract of 4.')"
+              >Raise the highest bid or pass permanently. The last bidder wins; a bid of 13 wins immediately. If everyone passes, the first bidder takes a
+              contract of 4.</span
+            >
+          </li>
+          <li>
+            <strong x-text="t('Choose trump.')">Choose trump.</strong>
+            <span x-text="t('The auction winner selects any suit and leads the first trick. Play and bidding go clockwise.')"
+              >The auction winner selects any suit and leads the first trick. Play and bidding go clockwise.</span
+            >
+          </li>
+          <li>
+            <strong x-text="t('Follow the led suit.')">Follow the led suit.</strong>
+            <span x-text="t('Beat the winning card if you can. With no led suit, play trump and overtrump if possible. With neither, discard anything.')"
+              >Beat the winning card if you can. With no led suit, play trump and overtrump if possible. With neither, discard anything.</span
+            >
+          </li>
+          <li>
+            <strong x-text="t('Trump stays closed')">Trump stays closed</strong>
+            <span x-text="t('until played off-suit, unless your hand contains only trump.')">until played off-suit, unless your hand contains only trump.</span>
+          </li>
+          <li>
+            <strong x-text="t('Make the contract:')">Make the contract:</strong>
+            <span
+              x-text="t('score tricks taken. Miss it: lose the contract value. Other players need at least one trick; take none and lose the contract value. Highest total after five rounds wins.')"
+              >score tricks taken. Miss it: lose the contract value. Other players need at least one trick; take none and lose the contract value. Highest total
+              after five rounds wins.</span
+            >
+          </li>
+        </ol>
+        <p
+          class="small muted"
+          x-text="t('House rules vary. Disconnected players keep their seats; their turn waits for them. Refresh to rejoin. Rooms and signed sessions expire when the server restarts.')"
+        >
+          House rules vary. Disconnected players keep their seats; their turn waits for them. Refresh to rejoin. Rooms and signed sessions expire when the
+          server restarts.
+        </p>
+        <button class="primary wide" @click="rulesOpen = false" x-text="t('Got it. Let’s play. →')">Got it. Let’s play. →</button>
+      </section>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,203 @@
+// Optional end-to-end verification. Runtime files have no npm dependencies.
+// PLAYWRIGHT_MODULE=/path/to/playwright node tests/browser.cjs
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
+const assert = require("node:assert/strict");
+
+async function verify() {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const desktop = await browser.newContext({
+      viewport: { width: 1440, height: 1050 },
+      colorScheme: "light",
+    });
+    const page = await desktop.newPage();
+    page.setDefaultTimeout(15000);
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const origin = process.env.BATAQ_URL || "http://localhost:8080";
+
+    await page.goto(origin);
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "system");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(245, 243, 235)");
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("radio", { name: "Dark", exact: true }).check();
+    assert.equal(await page.evaluate(() => localStorage.getItem("bataq.theme")), "dark");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(16, 29, 26)");
+    assert.equal(await page.locator('meta[name="theme-color"]').getAttribute("content"), "#101d1a");
+    await page.reload();
+    await page.getByPlaceholder("Your name", { exact: true }).waitFor();
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("radio", { name: "Light", exact: true }).check();
+    await page.emulateMedia({ colorScheme: "dark" });
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(245, 243, 235)");
+    await page.getByRole("radio", { name: /System/ }).check();
+    assert.equal(await page.evaluate(() => localStorage.getItem("bataq.theme")), null);
+    await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(16, 29, 26)");
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(245, 243, 235)");
+    await page.getByRole("button", { name: "Close menu" }).click();
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("radio", { name: "Türkçe" }).check();
+    await page.waitForFunction(() => document.documentElement.lang === "tr");
+    await page.getByRole("button", { name: "Menüyü kapat" }).click();
+    await page.reload();
+    await page.getByPlaceholder("Adın", { exact: true }).waitFor();
+    assert.equal(await page.locator("html").getAttribute("lang"), "tr");
+    await page.getByRole("button", { name: "Menüyü aç" }).click();
+    await page.getByRole("radio", { name: "English", exact: true }).check();
+    await page.waitForFunction(() => document.documentElement.lang === "en");
+    await page.getByRole("radio", { name: /Browser default/ }).check();
+    assert.equal(await page.evaluate(() => localStorage.getItem("bataq.language")), null);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !Alpine.$data(document.body).settingsOpen);
+    await page.locator("#name").fill("Abdus");
+    await page.getByRole("button", { name: "Create a table" }).click();
+    await page.waitForFunction(() => Alpine.$data(document.body).ready);
+    const room = await page.evaluate(() => Alpine.$data(document.body).room.id);
+    const token = await page.evaluate(() => Alpine.$data(document.body).token);
+    assert.equal(await page.evaluate(() => Alpine.$data(document.body).source instanceof WebSocket), true);
+    assert.equal(await page.evaluate(() => new URL(Alpine.$data(document.body).source.url).protocol), origin.startsWith("https:") ? "wss:" : "ws:");
+    await page.waitForSelector(".qr-box svg");
+
+    // A socket closure must restore the same seat without a page reload.
+    await page.evaluate(() => Alpine.$data(document.body).source.close());
+    await page.waitForFunction(() => !Alpine.$data(document.body).ready);
+    await page.waitForFunction(() => Alpine.$data(document.body).ready);
+    assert.equal(await page.evaluate(() => Alpine.$data(document.body).token), token);
+
+    await page.reload();
+    await page.waitForFunction(() => Alpine.$data(document.body).ready);
+    assert.equal(await page.evaluate(() => Alpine.$data(document.body).token), token);
+
+    const mobile = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const friend = await mobile.newPage();
+    friend.setDefaultTimeout(15000);
+    friend.on("pageerror", (error) => errors.push(error.message));
+    await friend.goto(`${origin}/?room=${room}`);
+    await friend.locator("#name").fill("Deniz");
+    await friend.getByRole("button", { name: "Join the table" }).click();
+    await friend.waitForFunction(() => Alpine.$data(document.body).ready);
+    await page.waitForFunction(() => Alpine.$data(document.body).room.players.length === 2);
+
+    await page.getByRole("button", { name: "Fill empty seats with bots" }).click();
+    await page.waitForFunction(() => Alpine.$data(document.body).room.players.length === 4);
+    await page.getByRole("button", { name: "Deal the cards" }).click();
+    await friend.waitForFunction(() => Alpine.$data(document.body).myTurn);
+    await friend.locator(".bid-range").fill("13");
+    await friend.getByRole("button", { name: /^Bid 13 tricks/ }).click();
+    await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "trump");
+    await friend.getByRole("button", { name: "Choose hearts as trump" }).click();
+    await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
+    assert.equal(await friend.evaluate(() => Alpine.$data(document.body).room.trump), 1);
+
+    await mobile.setOffline(true);
+    await friend.waitForFunction(() => !Alpine.$data(document.body).ready);
+    assert.equal(await friend.locator(".hand-card:enabled").count(), 0);
+    await mobile.setOffline(false);
+    await friend.waitForFunction(() => Alpine.$data(document.body).ready);
+    await friend.reload();
+    await friend.waitForFunction(() => Alpine.$data(document.body).ready && Alpine.$data(document.body).hand.length === 13);
+
+    await friend.locator(".hand-card.playable").first().click();
+    await friend.waitForFunction(() => Alpine.$data(document.body).hand.length === 12);
+    await page.waitForFunction(() => Alpine.$data(document.body).myTurn);
+    await page.locator(".hand-card.playable").first().click();
+    await page.waitForFunction(() => Alpine.$data(document.body).room.phase === "trick");
+    await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
+    assert.equal(await friend.evaluate(() => Alpine.$data(document.body).room.lastTrick.length), 4);
+    assert.equal(await friend.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+
+    await page.getByRole("button", { name: "Invite friends" }).click();
+    await page.waitForSelector('[aria-labelledby="share-title"] .qr-box svg');
+    await page.getByRole("button", { name: "Close invitation" }).click();
+
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await desktop.setOffline(true);
+    const shell = await desktop.newPage();
+    await shell.goto(origin);
+    await shell.waitForSelector(".brand");
+    assert.equal(await shell.locator(".brand").count(), 1);
+    await desktop.setOffline(false);
+
+    // Expiry uses the same client path as a server restart with a new signing key.
+    await friend.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem("bataq.session"));
+      saved.token = "expired";
+      localStorage.setItem("bataq.session", JSON.stringify(saved));
+    });
+    await friend.reload();
+    await friend.waitForFunction(() => !Alpine.$data(document.body).token && !!Alpine.$data(document.body).error);
+    const turkish = await browser.newContext({ locale: "tr-TR", viewport: { width: 390, height: 844 } });
+    const turkishPage = await turkish.newPage();
+    turkishPage.setDefaultTimeout(15000);
+    turkishPage.on("pageerror", (error) => errors.push(error.message));
+    await turkishPage.goto(`${origin}/?room=DOESNOTEXIST`);
+    assert.equal(await turkishPage.locator("html").getAttribute("lang"), "tr");
+    assert.equal(await turkishPage.title(), "Bataq — Yerini al.");
+    await turkishPage.getByPlaceholder("Adın", { exact: true }).fill("İpek");
+    await turkishPage.getByRole("button", { name: "Masaya katıl" }).click();
+    await turkishPage.waitForFunction(() => !!Alpine.$data(document.body).error);
+    assert.match(await turkishPage.locator(".toast").innerText(), /Bu oda bulunamadı/);
+    await turkishPage.locator("#room-code").fill("");
+    await turkishPage.getByRole("button", { name: "Masa oluştur" }).click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).ready);
+    await turkishPage.getByRole("button", { name: "Menüyü aç" }).click();
+    await turkishPage.getByRole("radio", { name: "Koyu", exact: true }).check();
+    assert.equal(await turkishPage.locator("html").getAttribute("data-theme"), "dark");
+    await turkishPage.getByRole("radio", { name: /Sistem/ }).check();
+    await turkishPage.getByRole("button", { name: "Nasıl oynanır" }).click();
+    await turkishPage.getByRole("heading", { name: "İhale. Koz. Oyun." }).waitFor();
+    await turkishPage.getByRole("button", { name: "Kuralları kapat" }).click();
+    await turkishPage.getByRole("button", { name: "Boş yerlere bot ekle" }).click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).room.players.length === 4);
+    await turkishPage.getByRole("button", { name: "Kartları dağıt" }).click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).myTurn);
+    await turkishPage.locator(".bid-range").fill("13");
+    await turkishPage.getByRole("button", { name: /^13 el de/ }).click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).room.phase === "trump");
+    await turkishPage.getByRole("button", { name: "kupa rengini koz seç" }).click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
+    await turkishPage.locator(".hand-card.playable").first().click();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).hand.length === 12);
+    await turkishPage.reload();
+    await turkishPage.waitForFunction(() => Alpine.$data(document.body).ready && Alpine.$data(document.body).hand.length === 12);
+    assert.equal(await turkishPage.locator("html").getAttribute("lang"), "tr");
+    assert.equal(await turkishPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+
+    // Verify all four suit colors in the real Alpine template, independent of the deal.
+    await page.evaluate(() => {
+      const app = Alpine.$data(document.body);
+      ++app.generation;
+      app.source?.close();
+      app.room.phase = app.phases.PLAYING;
+      app.room.trick = [0, 1, 2, 3].map((suit) => ({ seat: suit, card: { suit, rank: 14 } }));
+    });
+    await page.waitForFunction(() => document.querySelectorAll(".table-card").length === 4);
+    for (const suit of [0, 1, 2, 3]) {
+      const color = await page.locator(`.table-card.played-${suit}`).evaluate((card) => ({
+        red: card.classList.contains("red-card"),
+        card: getComputedStyle(card).color,
+        rank: getComputedStyle(card.querySelector(".corner b")).color,
+        symbol: getComputedStyle(card.querySelector(".card-symbol")).color,
+      }));
+      assert.equal(color.red, suit === 1 || suit === 2);
+      assert.equal(color.card, color.rank);
+      assert.equal(color.card, color.symbol);
+      assert.equal(color.card, suit === 1 || suit === 2 ? "rgb(188, 89, 72)" : "rgb(23, 62, 53)");
+    }
+    assert.deepEqual(errors, []);
+    console.log(
+      "Browser checks passed: gameplay, refresh, reconnect, mobile layout, language and theme preferences, OS theme changes, offline shell, expired sessions, and all suit colors.",
+    );
+  } finally {
+    await browser.close();
+  }
+}
+
+verify().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
