@@ -54,6 +54,9 @@ const CONNECTION = Object.freeze({
 });
 const LIVE_MESSAGE = Object.freeze({ STATE: "state", HEARTBEAT: "heartbeat" });
 const THEME = Object.freeze({ LIGHT: "light", DARK: "dark", SYSTEM: "system" });
+// Keep browser audio objects outside Alpine's reactive state.
+/** @type {AudioContext|null} */
+let turnAudio = null;
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("bataq", () => ({
@@ -86,6 +89,48 @@ document.addEventListener("alpine:init", () => {
     attempts: 0,
     lastMessage: 0,
     generation: 0,
+    lastTurnNotice: "",
+    /** @returns {void} */
+    unlockTurnAudio() {
+      try {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) return;
+        if (!turnAudio || turnAudio.state === "closed") turnAudio = new Audio();
+        if (turnAudio.state === "suspended") turnAudio.resume().catch(() => {});
+      } catch {}
+    },
+    /** @returns {void} */
+    notifyTurn() {
+      if (!this.myTurn) return;
+      const notice = `${this.room.id}:${this.room.round}:${this.room.phase}:${this.room.revision}`;
+      if (notice === this.lastTurnNotice) return;
+      this.lastTurnNotice = notice;
+      try {
+        navigator.vibrate?.(45);
+      } catch {}
+      if (turnAudio?.state !== "running") return;
+      try {
+        // A soft rising two-note chime, generated locally without an audio asset.
+        for (const [index, frequency] of [660, 880].entries()) {
+          const start = turnAudio.currentTime + index * 0.11;
+          const note = turnAudio.createOscillator();
+          const volume = turnAudio.createGain();
+          note.type = "sine";
+          note.frequency.value = frequency;
+          volume.gain.setValueAtTime(0, start);
+          volume.gain.linearRampToValueAtTime(0.07, start + 0.012);
+          volume.gain.exponentialRampToValueAtTime(0.001, start + 0.1);
+          note.connect(volume);
+          volume.connect(turnAudio.destination);
+          note.start(start);
+          note.stop(start + 0.11);
+          note.onended = () => {
+            note.disconnect();
+            volume.disconnect();
+          };
+        }
+      } catch {}
+    },
     /** @returns {'light'|'dark'} */
     get resolvedTheme() {
       return this.themePreference === THEME.SYSTEM ? (this.systemDark ? THEME.DARK : THEME.LIGHT) : this.themePreference;
@@ -244,6 +289,16 @@ document.addEventListener("alpine:init", () => {
     },
     /** @returns {void} */
     init() {
+      // Autoplay policies require audio activation inside a real user gesture.
+      for (const eventName of ["pointerdown", "keydown"]) {
+        document.addEventListener(
+          eventName,
+          (event) => {
+            if (event.isTrusted) this.unlockTurnAudio();
+          },
+          { capture: true },
+        );
+      }
       const appearance = window.matchMedia("(prefers-color-scheme: dark)");
       this.systemDark = appearance.matches;
       try {
@@ -372,8 +427,8 @@ document.addEventListener("alpine:init", () => {
           }
           if (message.kind !== LIVE_MESSAGE.STATE) return;
           this.lastMessage = Date.now();
-          this.apply(message.snapshot);
           this.ready = true;
+          this.apply(message.snapshot);
           this.restoring = false;
           this.connection = CONNECTION.ONLINE;
           this.attempts = 0;
@@ -407,6 +462,7 @@ document.addEventListener("alpine:init", () => {
       clearTimeout(this.retryTimer);
       this.token = "";
       this.room = null;
+      this.lastTurnNotice = "";
       this.hand = [];
       this.ready = false;
       this.restoring = false;
@@ -430,6 +486,7 @@ document.addEventListener("alpine:init", () => {
         this.hand = state.hand || [];
         this.legal = state.legal || [];
         this.bid = Math.max(this.bid, this.minBid);
+        this.notifyTurn();
         return this.$nextTick(() => this.renderQR());
       };
       if (changed && document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(update);

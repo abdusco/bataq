@@ -5,6 +5,46 @@ const vm = require("node:vm");
 
 const translations = import("../assets/translations.js");
 
+test("turn alerts fire for new turns and ignore reconnects and presence updates", () => {
+  let factory;
+  const vibrations = [];
+  const context = vm.createContext({
+    navigator: { vibrate: (duration) => vibrations.push(duration) },
+    location: { href: "http://localhost/" },
+    URL,
+    document: { addEventListener: (_name, callback) => callback() },
+    Alpine: {
+      data: (_name, value) => {
+        factory = value;
+      },
+    },
+  });
+  vm.runInContext(readFileSync("assets/main.js", "utf8").replace(/^import .*;$/gm, ""), context);
+  const app = factory();
+  app.you = 0;
+  for (const entry of [
+    { ready: false, turn: 0, phase: "bidding", revision: 1, count: 0 },
+    { ready: true, turn: 0, phase: "bidding", revision: 1, count: 1 },
+    { ready: true, turn: 0, phase: "bidding", revision: 1, count: 1 },
+    { ready: false, turn: 0, phase: "bidding", revision: 1, count: 1 },
+    { ready: true, turn: 0, phase: "bidding", revision: 1, count: 1 },
+    { ready: true, turn: 1, phase: "bidding", revision: 2, count: 1 },
+    { ready: true, turn: 0, phase: "trump", revision: 3, count: 2 },
+    { ready: true, turn: 0, phase: "playing", revision: 4, count: 3 },
+    { ready: true, turn: 0, phase: "trick", revision: 5, count: 3 },
+    { ready: true, turn: 0, phase: "playing", revision: 6, count: 4 },
+  ]) {
+    app.ready = entry.ready;
+    app.room = { id: "ROOM", round: 1, turn: entry.turn, phase: entry.phase, revision: entry.revision };
+    app.notifyTurn();
+    assert.equal(vibrations.length, entry.count, JSON.stringify(entry));
+  }
+  assert.ok(vibrations.every((duration) => duration === 45));
+  delete context.navigator.vibrate;
+  app.room.revision++;
+  assert.doesNotThrow(() => app.notifyTurn());
+});
+
 test("browser language selects the first supported preference", async () => {
   const { browserLanguage } = await translations;
   for (const { languages, expected } of [

@@ -11,6 +11,22 @@ async function verify() {
       colorScheme: "light",
     });
     const page = await desktop.newPage();
+    await page.addInitScript(() => {
+      window.turnAlerts = { vibrations: [], notes: 0 };
+      Object.defineProperty(navigator, "vibrate", {
+        value: (duration) => {
+          window.turnAlerts.vibrations.push(duration);
+          return true;
+        },
+      });
+      const Audio = window.AudioContext;
+      window.AudioContext = class extends Audio {
+        createOscillator() {
+          window.turnAlerts.notes++;
+          return super.createOscillator();
+        }
+      };
+    });
     page.setDefaultTimeout(15000);
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -104,6 +120,13 @@ async function verify() {
     await friend.locator(".hand-card.playable").first().click();
     await friend.waitForFunction(() => Alpine.$data(document.body).hand.length === 12);
     await page.waitForFunction(() => Alpine.$data(document.body).myTurn);
+    await page.waitForFunction(() => window.turnAlerts.notes >= 2 && window.turnAlerts.vibrations.length >= 1);
+    const alerts = await page.evaluate(() => ({ ...window.turnAlerts }));
+    assert.ok(alerts.vibrations.every((duration) => duration === 45));
+    assert.equal(alerts.notes, alerts.vibrations.length * 2);
+    await page.evaluate(() => Alpine.$data(document.body).connect());
+    await page.waitForFunction(() => Alpine.$data(document.body).ready);
+    assert.deepEqual(await page.evaluate(() => ({ ...window.turnAlerts })), alerts);
     await page.locator(".hand-card.playable").first().click();
     await page.waitForFunction(() => Alpine.$data(document.body).room.phase === "trick");
     await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
