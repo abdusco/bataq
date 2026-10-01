@@ -26,6 +26,14 @@ cloudflared tunnel --url http://127.0.0.1:3000
 
 Open the tunnel URL on both devices and share the room link. HTTPS enables PWA installation; reverse proxies must support WebSocket upgrades on `/api/live`.
 
+## Docker
+
+```sh
+docker compose up -d
+```
+
+Uses `ghcr.io/abdusco/bataq:v1.0.0`. Set `PORT` to change the host port or `BATAQ_VERSION` to choose another release. Use `docker compose up -d --build` to build locally. Pushing a `v*` tag runs tests, publishes images for amd64 and arm64 to GHCR, and creates a GitHub release.
+
 ## Development
 
 `main.go` bootstraps the server, `api.go` handles HTTP and live connections, `game.go` owns the game rules, and `assets/` contains the frontend and vendor licenses.

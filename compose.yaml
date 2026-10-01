@@ -1,0 +1,14 @@
+services:
+  bataq:
+    image: ghcr.io/abdusco/bataq:${BATAQ_VERSION:-v1.0.0}
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
