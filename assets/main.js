@@ -319,7 +319,7 @@ document.addEventListener("alpine:init", () => {
       try {
         this.name = localStorage.getItem("bataq.name") || "";
         const saved = /** @type {Session|null} */ (JSON.parse(localStorage.getItem("bataq.session") || "null"));
-        if (saved && (!this.roomCode || this.roomCode.toUpperCase() === saved.room)) {
+        if (saved && this.roomCode.toUpperCase() === saved.room) {
           this.token = saved.token;
           this.restoring = true;
           this.connect();

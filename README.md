@@ -1,6 +1,6 @@
 # Bataq
 
-Real-time, four-player İhaleli Batak PWA. Go 1.27, WebSockets, and vendored Alpine.js. No database or frontend build step.
+Real-time, four-player İhaleli Batak.
 
 ## Run
 

@@ -5,6 +5,71 @@ const vm = require("node:vm");
 
 const translations = import("../assets/translations.js");
 
+test("saved sessions restore only for their room link, leaving the homepage free to create a game", async () => {
+  for (const { search, restores } of [
+    { search: "", restores: false },
+    { search: "?room=", restores: false },
+    { search: "?room=ROOM", restores: true },
+    { search: "?room=room", restores: true },
+    { search: "?room=OTHER", restores: false },
+  ]) {
+    let factory;
+    let connections = 0;
+    let joinBody;
+    let replacedURL;
+    const storage = new Map([
+      ["bataq.name", "Deniz"],
+      ["bataq.session", JSON.stringify({ token: "saved-token", room: "ROOM" })],
+    ]);
+    const context = vm.createContext({
+      location: { href: `http://localhost/${search}` },
+      URL,
+      document: {
+        addEventListener: (name, callback) => {
+          if (name === "alpine:init") callback();
+        },
+      },
+      window: {
+        matchMedia: () => ({ matches: false, addEventListener() {} }),
+        addEventListener() {},
+      },
+      navigator: {},
+      localStorage: {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => storage.set(key, value),
+      },
+      setInterval() {},
+      history: { replaceState: (_state, _title, url) => { replacedURL = url; } },
+      fetch: async (url, options) => {
+        assert.equal(url, "/api/join");
+        joinBody = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ token: "new-token", room: "NEW" }) };
+      },
+      Alpine: { data: (_name, value) => { factory = value; } },
+    });
+    vm.runInContext(readFileSync("assets/main.js", "utf8").replace(/^import .*;$/gm, ""), context);
+    const app = factory();
+    app.updateDocumentTheme = () => {};
+    app.updateDocumentLanguage = () => {};
+    app.connect = () => { connections++; };
+    app.init();
+    assert.equal(app.name, "Deniz", search);
+    assert.equal(app.restoring, restores, search);
+    assert.equal(app.token, restores ? "saved-token" : "", search);
+    assert.equal(connections, restores ? 1 : 0, search);
+    assert.equal(JSON.parse(storage.get("bataq.session")).token, "saved-token", search);
+    if (!search) {
+      await app.join();
+      assert.deepEqual(joinBody, { name: "Deniz", room: "" });
+      assert.equal(app.token, "new-token");
+      assert.equal(connections, 1);
+      assert.equal(replacedURL, "/?room=NEW");
+      assert.deepEqual(JSON.parse(storage.get("bataq.session")), { token: "new-token", room: "NEW" });
+      assert.equal(app.error, "");
+    }
+  }
+});
+
 test("turn alerts fire for new turns and ignore reconnects and presence updates", () => {
   let factory;
   const vibrations = [];
