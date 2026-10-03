@@ -86,6 +86,30 @@ async function verify() {
     await page.waitForFunction(() => Alpine.$data(document.body).ready);
     assert.equal(await page.evaluate(() => Alpine.$data(document.body).token), token);
 
+    // Logo navigation must leave a saved game and allow a fresh table,
+    // including when the browser reports an installed PWA display mode.
+    const home = await desktop.newPage();
+    await home.addInitScript(() => {
+      const matchMedia = window.matchMedia.bind(window);
+      window.matchMedia = (query) => {
+        const result = matchMedia(query);
+        if (query === "(display-mode: standalone)") Object.defineProperty(result, "matches", { value: true });
+        return result;
+      };
+    });
+    await home.goto(`${origin}/?resume=1`);
+    await home.waitForFunction(() => Alpine.$data(document.body).ready);
+    assert.equal(await home.evaluate(() => Alpine.$data(document.body).token), token);
+    await home.locator(".brand").click();
+    await home.getByRole("button", { name: "Create a table" }).waitFor();
+    assert.equal(await home.evaluate(() => Alpine.$data(document.body).token), "");
+    assert.equal(await home.evaluate(() => JSON.parse(localStorage.getItem("bataq.session")).token), token);
+    await home.reload();
+    await home.getByRole("button", { name: "Create a table" }).click();
+    await home.waitForFunction(() => Alpine.$data(document.body).ready);
+    assert.notEqual(await home.evaluate(() => Alpine.$data(document.body).room.id), room);
+    await home.close();
+
     const mobile = await browser.newContext({
       viewport: { width: 390, height: 844 },
     });

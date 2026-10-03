@@ -38,7 +38,7 @@ Uses `ghcr.io/abdusco/bataq:v1.0.3`. Set `PORT` to change the host port or `BATA
 
 `main.go` bootstraps the server, `api.go` handles HTTP and live connections, `game.go` owns the game rules, and `assets/` contains the frontend and vendor licenses.
 
-The installed PWA loads its shell from cache and restores the saved seat on launch. WebSockets connect directly, preserve healthy connections across tab switches, reconnect stale sockets on foreground/network recovery, and retry stalled startup after eight seconds. Bump the cache version in `assets/sw.js` whenever shell assets change so installed apps receive the new shell together.
+The installed PWA loads its shell from cache and restores the saved seat through its `/?resume=1` launch URL. Clicking the logo opens `/` to create a new table. WebSockets connect directly, preserve healthy connections across tab switches, reconnect stale sockets on foreground/network recovery, and retry stalled startup after eight seconds. Bump the cache version in `assets/sw.js` whenever shell assets change so installed apps receive the new shell together.
 
 ```sh
 go test -race ./...

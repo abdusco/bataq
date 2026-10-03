@@ -244,7 +244,9 @@ test("saved sessions restore for their room link or installed launch, leaving th
     { search: "?room=ROOM", restores: true },
     { search: "?room=room", restores: true },
     { search: "?room=OTHER", restores: false },
-    { search: "", installed: true, restores: true },
+    { search: "", installed: true, restores: false },
+    { search: "?resume=1", installed: true, restores: true },
+    { search: "?resume=1&room=OTHER", installed: true, restores: false },
     { search: "?room=OTHER", installed: true, restores: false },
   ]) {
     let factory;
@@ -302,7 +304,7 @@ test("saved sessions restore for their room link or installed launch, leaving th
     assert.equal(app.token, restores ? "saved-token" : "", search);
     assert.equal(connections, restores ? 1 : 0, search);
     assert.equal(JSON.parse(storage.get("bataq.session")).token, "saved-token", search);
-    if (!search && !installed) {
+    if (!search) {
       await app.join();
       assert.deepEqual(joinBody, { name: "Deniz", room: "" });
       assert.equal(app.token, "new-token");

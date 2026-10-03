@@ -3,7 +3,7 @@
   "name": "Bataq — Batak with friends",
   "short_name": "Bataq",
   "description": "A little table for good company. Real-time Batak with friends.",
-  "start_url": "/",
+  "start_url": "/?resume=1",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f5f3eb",

@@ -322,8 +322,8 @@ document.addEventListener("alpine:init", () => {
       try {
         this.name = localStorage.getItem("bataq.name") || "";
         const saved = /** @type {Session|null} */ (JSON.parse(localStorage.getItem("bataq.session") || "null"));
-        const installed = window.matchMedia("(display-mode: standalone)").matches;
-        if (saved && (this.roomCode.toUpperCase() === saved.room || (installed && !this.roomCode))) {
+        const resume = new URL(location.href).searchParams.get("resume") === "1";
+        if (saved && (this.roomCode.toUpperCase() === saved.room || (resume && !this.roomCode))) {
           this.token = saved.token;
           this.roomCode = saved.room;
           history.replaceState(null, "", `/?room=${encodeURIComponent(saved.room)}`);
