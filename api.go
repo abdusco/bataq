@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
@@ -129,9 +130,9 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusServiceUnavailable, errors.New("All tables are occupied. Try again later."))
 			return
 		}
-		id := strings.ToUpper(randomID(5))
+		id := rand.Text()[:8]
 		for s.rooms[id] != nil {
-			id = strings.ToUpper(randomID(5))
+			id = rand.Text()[:8]
 		}
 		room = NewRoom(id)
 		s.rooms[id] = room

@@ -122,6 +122,56 @@ func TestHTTPGameAndPrivacy(t *testing.T) {
 	}
 }
 
+func TestCreatedRoomIDs(t *testing.T) {
+	s := newServer()
+	defer s.cancel()
+	h := s.handler()
+	var data struct{ Token, Room string }
+	for i := 0; i < 100; i++ {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("POST", "/api/join", strings.NewReader(`{"name":"Host"}`)))
+		if w.Code != http.StatusOK {
+			t.Fatal(w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+			t.Fatal(err)
+		}
+		if len(data.Room) != 8 {
+			t.Fatalf("room ID must contain eight characters: %q", data.Room)
+		}
+		for _, character := range data.Room {
+			if !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", character) {
+				t.Fatalf("room ID contains a non-base32 character: %q", data.Room)
+			}
+		}
+	}
+	if len(s.rooms) != 100 {
+		t.Fatalf("created %d rooms, want 100", len(s.rooms))
+	}
+	for _, tt := range []struct {
+		name, code string
+	}{
+		{"uppercase", data.Room},
+		{"lowercase", strings.ToLower(data.Room)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := json.Marshal(Request{Name: "Friend", Room: tt.code})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("POST", "/api/join", bytes.NewReader(b)))
+			if w.Code != http.StatusOK {
+				t.Fatal(w.Body.String())
+			}
+			var joined struct{ Room string }
+			if err := json.Unmarshal(w.Body.Bytes(), &joined); err != nil {
+				t.Fatal(err)
+			}
+			if joined.Room != data.Room {
+				t.Fatalf("joined %q, want %q", joined.Room, data.Room)
+			}
+		})
+	}
+}
+
 func TestCORS(t *testing.T) {
 	for _, tt := range []struct {
 		name, method, path, origin, body string
