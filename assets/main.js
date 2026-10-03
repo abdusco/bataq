@@ -90,6 +90,7 @@ document.addEventListener("alpine:init", () => {
     sessionController: null,
     attempts: 0,
     lastMessage: 0,
+    connectStarted: 0,
     generation: 0,
     lastTurnNotice: "",
     /** @returns {void} */
@@ -403,13 +404,16 @@ document.addEventListener("alpine:init", () => {
     /** @returns {void} */
     wake() {
       if (!this.token || document.hidden || navigator.onLine === false) return;
-      // Android can deliver several foreground events together.
-      if (this.connection === CONNECTION.CONNECTING && Date.now() - this.lastMessage < 1000) return;
+      // A short tab switch doesn't invalidate a healthy live connection.
+      if (this.ready && this.source?.readyState === WebSocket.OPEN && Date.now() - this.lastMessage <= 20000) return;
       this.attempts = 0;
       this.connect();
     },
     /** @returns {void} */
     connect() {
+      // Foreground events and retries must let an existing attempt finish.
+      // Use the attempt's start time: heartbeats must not extend its deadline.
+      if (this.source && this.connection === CONNECTION.CONNECTING && Date.now() - this.connectStarted < 8000) return;
       this.stopConnection();
       if (!this.token) return;
       this.ready = false;
@@ -419,7 +423,8 @@ document.addEventListener("alpine:init", () => {
       }
       const generation = this.generation;
       this.connection = CONNECTION.CONNECTING;
-      this.lastMessage = Date.now();
+      this.connectStarted = Date.now();
+      this.lastMessage = this.connectStarted;
       let failed = false;
       const fail = () => {
         if (generation !== this.generation || failed) return;

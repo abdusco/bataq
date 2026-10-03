@@ -13,12 +13,17 @@ function connectionClient(fetch) {
   let clock = 10000;
   let timerID = 0;
   class Socket {
+    static OPEN = 1;
     constructor(url) {
       this.url = url;
+      this.readyState = 0;
       sockets.push(this);
     }
     addEventListener(name, callback) {
-      this[name] = callback;
+      this[name] = (event) => {
+        if (name === "message") this.readyState = Socket.OPEN;
+        callback(event);
+      };
     }
     close() {
       this.closed = true;
@@ -113,11 +118,11 @@ test("stalled startup retries once without waiting for a slow session diagnostic
   assert.equal(app.ready, false);
 });
 
-test("foreground events reconnect immediately and coalesce; offline cancels pending work", () => {
+test("foreground events reconnect stale sockets and coalesce; offline cancels pending work", () => {
   const { app, sockets, events, context, advance, timers } = connectionClient(() => new Promise(() => {}));
   app.connect();
   sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
-  advance(2000);
+  advance(21000);
   events.visibilitychange();
   events.resume();
   events.pageshow({ persisted: true });
@@ -134,6 +139,53 @@ test("foreground events reconnect immediately and coalesce; offline cancels pend
   context.navigator.onLine = true;
   events.online();
   assert.equal(sockets.length, 3);
+});
+
+test("short tab switches preserve a healthy connection", () => {
+  const { app, sockets, events, advance } = connectionClient(() => assert.fail("unexpected diagnostic"));
+  app.connect();
+  sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
+  advance(2000);
+  events.visibilitychange();
+  events.resume();
+  events.pageshow({ persisted: true });
+  events.focus();
+  assert.equal(sockets.length, 1);
+  assert.equal(sockets[0].closed, undefined);
+  assert.equal(app.ready, true);
+});
+
+test("delayed foreground events and connect calls preserve a pending handshake until its deadline", () => {
+  const { app, sockets, events, advance, timers } = connectionClient(() => assert.fail("unexpected diagnostic"));
+  app.connect();
+  const deadline = app.connectTimer;
+  for (const elapsed of [1500, 2000, 4000]) {
+    advance(elapsed);
+    events.visibilitychange();
+    events.resume();
+    events.pageshow({ persisted: true });
+    events.focus();
+    app.connect();
+    assert.equal(sockets.length, 1);
+    assert.equal(sockets[0].closed, undefined);
+    assert.equal(app.connectTimer, deadline);
+    assert.ok(timers.has(deadline));
+  }
+  sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
+  assert.equal(app.ready, true);
+  assert.equal(timers.size, 0);
+});
+
+test("foreground recovery replaces an overdue attempt even if its timer was suspended", () => {
+  const { app, sockets, events, advance } = connectionClient(() => assert.fail("unexpected diagnostic"));
+  app.connect();
+  advance(9000);
+  events.visibilitychange();
+  assert.equal(sockets.length, 2);
+  assert.equal(sockets[0].closed, true);
+  sockets[0].onclose();
+  sockets[1].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
+  assert.equal(app.ready, true);
 });
 
 test("a delayed unauthorized diagnostic expires the session even after a socket retry", async () => {
