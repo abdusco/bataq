@@ -1,6 +1,6 @@
 services:
   bataq:
-    image: ghcr.io/abdusco/bataq:${BATAQ_VERSION:-v1.0.3}
+    image: ghcr.io/abdusco/bataq:latest
     build: .
     ports:
       - "${PORT:-8080}:8080"

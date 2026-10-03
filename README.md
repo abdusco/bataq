@@ -32,7 +32,7 @@ Open the tunnel URL on both devices and share the room link. HTTPS enables PWA i
 docker compose up -d
 ```
 
-Uses `ghcr.io/abdusco/bataq:v1.0.3`. Set `PORT` to change the host port or `BATAQ_VERSION` to choose another release. Use `docker compose up -d --build` to build locally. Pushing a `v*` tag runs tests, publishes images for amd64 and arm64 to GHCR, and creates a GitHub release.
+Uses `ghcr.io/abdusco/bataq:latest`. Set `PORT` to change the host port. Use `docker compose up -d --build` to build locally. Pushing a `v*` tag runs tests, publishes images for amd64 and arm64 to GHCR, and creates a GitHub release.
 
 ## Development
 
