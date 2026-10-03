@@ -413,7 +413,7 @@ document.addEventListener("alpine:init", () => {
     connect() {
       // Foreground events and retries must let an existing attempt finish.
       // Use the attempt's start time: heartbeats must not extend its deadline.
-      if (this.source && this.connection === CONNECTION.CONNECTING && Date.now() - this.connectStarted < 8000) return;
+      if (this.source && this.connection === CONNECTION.CONNECTING && Date.now() - this.connectStarted < 2000) return;
       this.stopConnection();
       if (!this.token) return;
       this.ready = false;
@@ -438,7 +438,7 @@ document.addEventListener("alpine:init", () => {
         // only after failure, so successful connections need no HTTP preflight.
         this.checkSession();
       };
-      this.connectTimer = setTimeout(fail, 8000);
+      this.connectTimer = setTimeout(fail, 2000);
       try {
         const url = new URL("/api/live", location.href);
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

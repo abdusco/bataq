@@ -104,6 +104,7 @@ test("socket starts without an HTTP preflight and waits for a live snapshot", ()
 test("stalled startup retries once without waiting for a slow session diagnostic", () => {
   const { app, sockets, timers } = connectionClient(() => new Promise(() => {}));
   app.connect();
+  assert.equal(timers.get(app.connectTimer).delay, 2000);
   timers.get(app.connectTimer).callback();
   assert.equal(sockets[0].closed, true);
   assert.equal(app.connection, "offline");
@@ -159,7 +160,8 @@ test("delayed foreground events and connect calls preserve a pending handshake u
   const { app, sockets, events, advance, timers } = connectionClient(() => assert.fail("unexpected diagnostic"));
   app.connect();
   const deadline = app.connectTimer;
-  for (const elapsed of [1500, 2000, 4000]) {
+  assert.equal(timers.get(deadline).delay, 2000);
+  for (const elapsed of [1100, 400, 400]) {
     advance(elapsed);
     events.visibilitychange();
     events.resume();
@@ -179,7 +181,7 @@ test("delayed foreground events and connect calls preserve a pending handshake u
 test("foreground recovery replaces an overdue attempt even if its timer was suspended", () => {
   const { app, sockets, events, advance } = connectionClient(() => assert.fail("unexpected diagnostic"));
   app.connect();
-  advance(9000);
+  advance(2000);
   events.visibilitychange();
   assert.equal(sockets.length, 2);
   assert.equal(sockets[0].closed, true);
