@@ -5,13 +5,195 @@ const vm = require("node:vm");
 
 const translations = import("../assets/translations.js");
 
-test("saved sessions restore only for their room link, leaving the homepage free to create a game", async () => {
-  for (const { search, restores } of [
+function connectionClient(fetch) {
+  let factory;
+  const sockets = [];
+  const timers = new Map();
+  const events = {};
+  let clock = 10000;
+  let timerID = 0;
+  class Socket {
+    constructor(url) {
+      this.url = url;
+      sockets.push(this);
+    }
+    addEventListener(name, callback) {
+      this[name] = callback;
+    }
+    close() {
+      this.closed = true;
+    }
+  }
+  const context = vm.createContext({
+    URL,
+    AbortController,
+    WebSocket: Socket,
+    Date: { now: () => clock },
+    location: { href: "https://example.com/?room=ROOM" },
+    navigator: { onLine: true },
+    document: {
+      hidden: false,
+      addEventListener(name, callback) {
+        if (name === "alpine:init") callback();
+        else events[name] = callback;
+      },
+    },
+    window: {
+      matchMedia: () => ({ matches: false, addEventListener() {} }),
+      addEventListener: (name, callback) => {
+        events[name] = callback;
+      },
+    },
+    localStorage: { getItem: () => null, removeItem() {} },
+    history: { replaceState() {} },
+    setInterval() {},
+    setTimeout: (callback, delay) => {
+      timers.set(++timerID, { callback, delay });
+      return timerID;
+    },
+    clearTimeout: (id) => timers.delete(id),
+    fetch,
+    Alpine: {
+      data: (_name, value) => {
+        factory = value;
+      },
+    },
+  });
+  vm.runInContext(readFileSync("assets/main.js", "utf8").replace(/^import .*;$/gm, ""), context);
+  const app = factory();
+  app.updateDocumentTheme = () => {};
+  app.updateDocumentLanguage = () => {};
+  app.apply = (snapshot) => {
+    app.room = snapshot.room;
+  };
+  app.t = (message) => message;
+  app.init();
+  app.token = "saved-token";
+  return {
+    app,
+    sockets,
+    timers,
+    events,
+    context,
+    advance: (ms) => {
+      clock += ms;
+    },
+  };
+}
+
+test("socket starts without an HTTP preflight and waits for a live snapshot", () => {
+  const { app, sockets, timers } = connectionClient(() => assert.fail("unexpected HTTP preflight"));
+  app.connect();
+  assert.equal(sockets.length, 1);
+  assert.equal(String(sockets[0].url), "wss://example.com/api/live?token=saved-token");
+  assert.equal(app.ready, false);
+  sockets[0].message({ data: JSON.stringify({ kind: "heartbeat" }) });
+  assert.equal(app.ready, false);
+  assert.equal(timers.size, 1);
+  sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
+  assert.equal(app.ready, true);
+  assert.equal(app.connection, "online");
+  assert.equal(timers.size, 0);
+});
+
+test("stalled startup retries once without waiting for a slow session diagnostic", () => {
+  const { app, sockets, timers } = connectionClient(() => new Promise(() => {}));
+  app.connect();
+  timers.get(app.connectTimer).callback();
+  assert.equal(sockets[0].closed, true);
+  assert.equal(app.connection, "offline");
+  const retryID = app.retryTimer;
+  sockets[0].onerror();
+  sockets[0].onclose();
+  assert.equal(app.retryTimer, retryID);
+  assert.ok(timers.get(retryID).delay < 500);
+  timers.get(retryID).callback();
+  assert.equal(sockets.length, 2);
+  sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "OLD" } } }) });
+  assert.equal(app.ready, false);
+});
+
+test("foreground events reconnect immediately and coalesce; offline cancels pending work", () => {
+  const { app, sockets, events, context, advance, timers } = connectionClient(() => new Promise(() => {}));
+  app.connect();
+  sockets[0].message({ data: JSON.stringify({ kind: "state", snapshot: { room: { id: "ROOM" } } }) });
+  advance(2000);
+  events.visibilitychange();
+  events.resume();
+  events.pageshow({ persisted: true });
+  events.focus();
+  assert.equal(sockets.length, 2);
+  assert.equal(sockets[0].closed, true);
+  assert.equal(app.ready, false);
+  context.navigator.onLine = false;
+  events.offline();
+  assert.equal(sockets[1].closed, true);
+  assert.equal(timers.size, 0);
+  app.connect();
+  assert.equal(sockets.length, 2);
+  context.navigator.onLine = true;
+  events.online();
+  assert.equal(sockets.length, 3);
+});
+
+test("a delayed unauthorized diagnostic expires the session even after a socket retry", async () => {
+  let resolve;
+  const { app, sockets, timers } = connectionClient(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  app.connect();
+  sockets[0].onerror();
+  timers.get(app.retryTimer).callback();
+  resolve({ status: 401, json: async () => ({ error: "Session expired" }) });
+  await new Promise((done) => setImmediate(done));
+  assert.equal(app.token, "");
+  assert.equal(app.error, "Session expired");
+  assert.equal(sockets[1].closed, true);
+  assert.equal(timers.size, 0);
+});
+
+test("installed shell and scripts load from cache without waiting for the network", async () => {
+  const events = {};
+  const context = vm.createContext({
+    URL,
+    self: {
+      location: { origin: "https://example.com" },
+      addEventListener: (name, callback) => {
+        events[name] = callback;
+      },
+    },
+    caches: { match: async (request) => ({ cached: typeof request === "string" ? request : request.url }) },
+    fetch: () => assert.fail("cached launch should not wait for fetch"),
+  });
+  vm.runInContext(readFileSync("assets/sw.js", "utf8"), context);
+  for (const { path, mode, cached } of [
+    { path: "/?room=ROOM", mode: "navigate", cached: "/" },
+    { path: "/main.js", mode: "cors", cached: "https://example.com/main.js" },
+  ]) {
+    let response;
+    events.fetch({
+      request: { url: `https://example.com${path}`, method: "GET", mode },
+      respondWith: (value) => {
+        response = value;
+      },
+    });
+    assert.equal((await response).cached, cached);
+  }
+  events.fetch({ request: { url: "https://example.com/api/session", method: "GET" }, respondWith: () => assert.fail("API must bypass shell cache") });
+});
+
+test("saved sessions restore for their room link or installed launch, leaving the browser homepage free", async () => {
+  for (const { search, installed = false, restores } of [
     { search: "", restores: false },
     { search: "?room=", restores: false },
     { search: "?room=ROOM", restores: true },
     { search: "?room=room", restores: true },
     { search: "?room=OTHER", restores: false },
+    { search: "", installed: true, restores: true },
+    { search: "?room=OTHER", installed: true, restores: false },
   ]) {
     let factory;
     let connections = 0;
@@ -30,7 +212,7 @@ test("saved sessions restore only for their room link, leaving the homepage free
         },
       },
       window: {
-        matchMedia: () => ({ matches: false, addEventListener() {} }),
+        matchMedia: (query) => ({ matches: installed && query === "(display-mode: standalone)", addEventListener() {} }),
         addEventListener() {},
       },
       navigator: {},
@@ -39,26 +221,36 @@ test("saved sessions restore only for their room link, leaving the homepage free
         setItem: (key, value) => storage.set(key, value),
       },
       setInterval() {},
-      history: { replaceState: (_state, _title, url) => { replacedURL = url; } },
+      history: {
+        replaceState: (_state, _title, url) => {
+          replacedURL = url;
+        },
+      },
       fetch: async (url, options) => {
         assert.equal(url, "/api/join");
         joinBody = JSON.parse(options.body);
         return { ok: true, json: async () => ({ token: "new-token", room: "NEW" }) };
       },
-      Alpine: { data: (_name, value) => { factory = value; } },
+      Alpine: {
+        data: (_name, value) => {
+          factory = value;
+        },
+      },
     });
     vm.runInContext(readFileSync("assets/main.js", "utf8").replace(/^import .*;$/gm, ""), context);
     const app = factory();
     app.updateDocumentTheme = () => {};
     app.updateDocumentLanguage = () => {};
-    app.connect = () => { connections++; };
+    app.connect = () => {
+      connections++;
+    };
     app.init();
     assert.equal(app.name, "Deniz", search);
     assert.equal(app.restoring, restores, search);
     assert.equal(app.token, restores ? "saved-token" : "", search);
     assert.equal(connections, restores ? 1 : 0, search);
     assert.equal(JSON.parse(storage.get("bataq.session")).token, "saved-token", search);
-    if (!search) {
+    if (!search && !installed) {
       await app.join();
       assert.deepEqual(joinBody, { name: "Deniz", room: "" });
       assert.equal(app.token, "new-token");

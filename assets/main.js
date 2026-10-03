@@ -86,6 +86,8 @@ document.addEventListener("alpine:init", () => {
     installPrompt: /** @type {InstallPrompt|null} */ (null),
     source: /** @type {WebSocket|null} */ (null),
     retryTimer: null,
+    connectTimer: null,
+    sessionController: null,
     attempts: 0,
     lastMessage: 0,
     generation: 0,
@@ -319,8 +321,11 @@ document.addEventListener("alpine:init", () => {
       try {
         this.name = localStorage.getItem("bataq.name") || "";
         const saved = /** @type {Session|null} */ (JSON.parse(localStorage.getItem("bataq.session") || "null"));
-        if (saved && this.roomCode.toUpperCase() === saved.room) {
+        const installed = window.matchMedia("(display-mode: standalone)").matches;
+        if (saved && (this.roomCode.toUpperCase() === saved.room || (installed && !this.roomCode))) {
           this.token = saved.token;
+          this.roomCode = saved.room;
+          history.replaceState(null, "", `/?room=${encodeURIComponent(saved.room)}`);
           this.restoring = true;
           this.connect();
         }
@@ -328,21 +333,30 @@ document.addEventListener("alpine:init", () => {
         this.error = this.t("Browser storage is unavailable. Keep this tab open to retain your seat.");
       }
       window.addEventListener("online", () => {
-        if (this.token) this.connect();
+        this.wake();
       });
       window.addEventListener("offline", () => {
+        this.stopConnection();
+        this.sessionController?.abort();
         this.ready = false;
         this.connection = CONNECTION.OFFLINE;
       });
       document.addEventListener("visibilitychange", () => {
-        if (!document.hidden && this.token && (!this.ready || Date.now() - this.lastMessage > 25000)) this.connect();
+        if (!document.hidden) this.wake();
+      });
+      document.addEventListener("resume", () => this.wake());
+      window.addEventListener("pageshow", (event) => {
+        if (event.persisted) this.wake();
+      });
+      window.addEventListener("focus", () => {
+        if (!this.ready || Date.now() - this.lastMessage > 15000) this.wake();
       });
       window.addEventListener("beforeinstallprompt", (e) => {
         e.preventDefault();
         this.installPrompt = /** @type {InstallPrompt} */ (e);
       });
       setInterval(() => {
-        if (this.token && this.source && Date.now() - this.lastMessage > 30000) this.connect();
+        if (!document.hidden && this.token && this.ready && Date.now() - this.lastMessage > 20000) this.connect();
       }, 5000);
       if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
     },
@@ -378,47 +392,61 @@ document.addEventListener("alpine:init", () => {
         this.pending = false;
       }
     },
-    /** @returns {Promise<void>} */
-    async connect() {
+    /** @returns {void} */
+    stopConnection() {
+      ++this.generation;
       clearTimeout(this.retryTimer);
-      const generation = ++this.generation;
+      clearTimeout(this.connectTimer);
       this.source?.close();
       this.source = null;
+    },
+    /** @returns {void} */
+    wake() {
+      if (!this.token || document.hidden || navigator.onLine === false) return;
+      // Android can deliver several foreground events together.
+      if (this.connection === CONNECTION.CONNECTING && Date.now() - this.lastMessage < 1000) return;
+      this.attempts = 0;
+      this.connect();
+    },
+    /** @returns {void} */
+    connect() {
+      this.stopConnection();
+      if (!this.token) return;
       this.ready = false;
+      if (navigator.onLine === false) {
+        this.connection = CONNECTION.OFFLINE;
+        return;
+      }
+      const generation = this.generation;
       this.connection = CONNECTION.CONNECTING;
       this.lastMessage = Date.now();
-      const timeout = new AbortController();
-      const timer = setTimeout(() => timeout.abort(), 12000);
+      let failed = false;
+      const fail = () => {
+        if (generation !== this.generation || failed) return;
+        failed = true;
+        clearTimeout(this.connectTimer);
+        this.source?.close();
+        this.source = null;
+        this.ready = false;
+        this.connection = CONNECTION.OFFLINE;
+        // Browser sockets hide failed handshake HTTP statuses. Check expiry
+        // only after failure, so successful connections need no HTTP preflight.
+        this.checkSession();
+      };
+      this.connectTimer = setTimeout(fail, 8000);
       try {
-        const response = await fetch("/api/session", {
-          headers: { Authorization: this.token },
-          cache: "no-store",
-          signal: timeout.signal,
-        });
-        if (generation !== this.generation) return;
-        if (response.status === 401) {
-          const data = await response.json();
-          this.expire(data.error);
-          return;
-        }
-        if (!response.ok) throw new Error("Connection unavailable");
-        // Stay disabled until the live socket delivers its authoritative snapshot.
-        const snapshot = /** @type {Snapshot} */ (await response.json());
-        if (generation !== this.generation) return;
-        this.apply(snapshot);
-        if (generation !== this.generation) return;
         const url = new URL("/api/live", location.href);
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         url.searchParams.set("token", this.token);
         const source = new WebSocket(url);
         this.source = source;
         source.addEventListener("message", (event) => {
-          if (generation !== this.generation) return;
+          if (generation !== this.generation || failed) return;
           let message;
           try {
             message = /** @type {LiveMessage} */ (JSON.parse(event.data));
           } catch {
-            source.close();
+            fail();
             return;
           }
           if (message.kind === LIVE_MESSAGE.HEARTBEAT) {
@@ -426,6 +454,7 @@ document.addEventListener("alpine:init", () => {
             return;
           }
           if (message.kind !== LIVE_MESSAGE.STATE) return;
+          clearTimeout(this.connectTimer);
           this.lastMessage = Date.now();
           this.ready = true;
           this.apply(message.snapshot);
@@ -433,17 +462,36 @@ document.addEventListener("alpine:init", () => {
           this.connection = CONNECTION.ONLINE;
           this.attempts = 0;
         });
-        source.onclose = () => {
-          if (generation !== this.generation) return;
-          source.close();
-          this.source = null;
-          this.retry();
-        };
-        source.onerror = () => source.close();
+        source.onclose = fail;
+        source.onerror = fail;
       } catch {
-        if (generation === this.generation) this.retry();
+        fail();
+      }
+    },
+    /** @returns {Promise<void>} */
+    async checkSession() {
+      // Retry independently: a slow HTTP diagnostic must not delay the socket.
+      this.retry();
+      if (this.sessionController) return;
+      const token = this.token;
+      const controller = new AbortController();
+      this.sessionController = controller;
+      const timer = setTimeout(() => controller.abort(), 3000);
+      try {
+        const response = await fetch("/api/session", {
+          headers: { Authorization: token },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.status === 401) {
+          const data = await response.json();
+          if (token === this.token) this.expire(data.error);
+        }
+      } catch {
+        // A network failure is handled by the scheduled socket retry.
       } finally {
         clearTimeout(timer);
+        if (this.sessionController === controller) this.sessionController = null;
       }
     },
     /** @returns {void} */
@@ -451,15 +499,14 @@ document.addEventListener("alpine:init", () => {
       this.ready = false;
       this.connection = CONNECTION.OFFLINE;
       clearTimeout(this.retryTimer);
-      const wait = Math.min(10000, 700 * 2 ** Math.min(this.attempts++, 5)) + Math.random() * 400;
+      if (!this.token || navigator.onLine === false) return;
+      const wait = Math.min(10000, 250 * 2 ** Math.min(this.attempts++, 6)) + Math.random() * 250;
       this.retryTimer = setTimeout(() => this.connect(), wait);
     },
     /** @param {string} [message] @returns {void} */
     expire(message) {
-      ++this.generation;
-      this.source?.close();
-      this.source = null;
-      clearTimeout(this.retryTimer);
+      this.stopConnection();
+      this.sessionController?.abort();
       this.token = "";
       this.room = null;
       this.lastTurnNotice = "";
@@ -489,7 +536,8 @@ document.addEventListener("alpine:init", () => {
         this.notifyTurn();
         return this.$nextTick(() => this.renderQR());
       };
-      if (changed && document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(update);
+      // The first live snapshot must exist before ready enables the UI.
+      if (this.room && changed && document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(update);
       else update();
     },
     /** @param {ActionKind} action @param {MovePayload} [extra={}] @returns {Promise<void>} */
