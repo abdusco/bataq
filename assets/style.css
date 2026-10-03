@@ -1314,8 +1314,14 @@
   .trick-area {
     inset-inline: 60px;
   }
+  .turn-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
   .trump-chip {
-    display: none;
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 0;
   }
 }
 @media (max-width: 720px) {
@@ -1482,9 +1488,6 @@
   .panel-card:has(.bid-control) .primary {
     grid-column: 1/-1;
   }
-  .side-panel:has(.bid-control) .scores {
-    display: none;
-  }
   .hand-panel {
     padding: 19px 14px 24px;
     margin-top: 16px;
@@ -1540,9 +1543,6 @@
   .score-header,
   .score-row {
     grid-template-columns: minmax(0, 1fr) 85px 45px;
-  }
-  .last-trick {
-    display: none;
   }
   .results {
     grid-template-columns: 1fr;

@@ -126,12 +126,15 @@ async function verify() {
     await page.waitForFunction(() => Alpine.$data(document.body).room.players.length === 4);
     await page.getByRole("button", { name: "Deal the cards" }).click();
     await friend.waitForFunction(() => Alpine.$data(document.body).myTurn);
+    await friend.locator(".scores").waitFor({ state: "visible" });
     await friend.locator(".bid-range").fill("13");
     await friend.getByRole("button", { name: /^Bid 13 tricks/ }).click();
     await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "trump");
     await friend.getByRole("button", { name: "Choose hearts as trump" }).click();
     await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
     assert.equal(await friend.evaluate(() => Alpine.$data(document.body).room.trump), 1);
+    await friend.locator(".trump-chip").waitFor({ state: "visible" });
+    await friend.locator(".scores").waitFor({ state: "visible" });
 
     await mobile.setOffline(true);
     await friend.waitForFunction(() => !Alpine.$data(document.body).ready);
@@ -155,7 +158,16 @@ async function verify() {
     await page.waitForFunction(() => Alpine.$data(document.body).room.phase === "trick");
     await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "playing");
     assert.equal(await friend.evaluate(() => Alpine.$data(document.body).room.lastTrick.length), 4);
-    assert.equal(await friend.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    for (const width of [320, 390, 720, 1000]) {
+      await friend.setViewportSize({ width, height: 844 });
+      await friend.locator(".trump-chip").waitFor({ state: "visible" });
+      await friend.locator(".scores").waitFor({ state: "visible" });
+      await friend.locator(".last-trick").waitFor({ state: "visible" });
+      assert.equal(await friend.locator(".score-row").count(), 4);
+      assert.equal(await friend.locator(".mini-trick > div").count(), 4);
+      assert.equal(await friend.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `overflow at ${width}px`);
+    }
+    await friend.setViewportSize({ width: 390, height: 844 });
 
     await page.getByRole("button", { name: "Invite friends" }).click();
     await page.waitForSelector('[aria-labelledby="share-title"] .qr-box svg');
