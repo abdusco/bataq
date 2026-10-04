@@ -5,11 +5,12 @@ const vm = require("node:vm");
 
 const translations = import("../assets/translations.js");
 
-function connectionClient(fetch) {
+function connectionClient(fetch, storage = new Map()) {
   let factory;
   const sockets = [];
   const timers = new Map();
   const events = {};
+  const music = [];
   let clock = 10000;
   let timerID = 0;
   class Socket {
@@ -33,6 +34,22 @@ function connectionClient(fetch) {
     URL,
     AbortController,
     WebSocket: Socket,
+    GenerativeMusic: class {
+      constructor() {
+        this.starts = 0;
+        this.pauses = 0;
+        music.push(this);
+      }
+      start() {
+        this.starts++;
+      }
+      pause() {
+        this.pauses++;
+      }
+      setVolume(volume) {
+        this.volume = volume;
+      }
+    },
     Date: { now: () => clock },
     location: { href: "https://example.com/?room=ROOM" },
     navigator: { onLine: true },
@@ -49,7 +66,11 @@ function connectionClient(fetch) {
         events[name] = callback;
       },
     },
-    localStorage: { getItem: () => null, removeItem() {} },
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
     history: { replaceState() {} },
     setInterval() {},
     setTimeout: (callback, delay) => {
@@ -80,11 +101,42 @@ function connectionClient(fetch) {
     timers,
     events,
     context,
+    music,
+    storage,
     advance: (ms) => {
       clock += ms;
     },
   };
 }
+
+test("music defaults on, waits for interaction, saves controls, and pauses in the background", () => {
+  const { app, music, events, context, storage } = connectionClient(() => {});
+  assert.equal(app.musicEnabled, true);
+  assert.equal(app.musicVolume, 25);
+  assert.equal(music.length, 0);
+  events.pointerdown({ isTrusted: false });
+  assert.equal(music.length, 0);
+  events.pointerdown({ isTrusted: true });
+  assert.equal(music.length, 1);
+  assert.equal(music[0].starts, 1);
+  app.setMusicVolume(40);
+  assert.equal(music[0].volume, 0.4);
+  assert.equal(storage.get("bataq.musicVolume"), "40");
+  context.document.hidden = true;
+  events.visibilitychange();
+  assert.equal(music[0].pauses, 1);
+  context.document.hidden = false;
+  events.visibilitychange();
+  assert.equal(music[0].starts, 2);
+  app.setMusic(false);
+  assert.equal(storage.get("bataq.music"), "off");
+  assert.equal(music[0].pauses, 2);
+  const restored = connectionClient(() => {}, storage);
+  assert.equal(restored.app.musicEnabled, false);
+  assert.equal(restored.app.musicVolume, 40);
+  restored.events.pointerdown({ isTrusted: true });
+  assert.equal(restored.music.length, 0);
+});
 
 test("socket starts without an HTTP preflight and waits for a live snapshot", () => {
   const { app, sockets, timers } = connectionClient(() => assert.fail("unexpected HTTP preflight"));

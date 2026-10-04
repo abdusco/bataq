@@ -1,4 +1,5 @@
 import { browserLanguage, translate } from "./translations.js";
+import { GenerativeMusic } from "./music.js";
 // Alpine starts in a microtask, after the listener below is registered.
 import "./vendor/alpine.min.js";
 
@@ -57,12 +58,16 @@ const THEME = Object.freeze({ LIGHT: "light", DARK: "dark", SYSTEM: "system" });
 // Keep browser audio objects outside Alpine's reactive state.
 /** @type {AudioContext|null} */
 let turnAudio = null;
+/** @type {GenerativeMusic|null} */
+let gameMusic = null;
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("bataq", () => ({
     languagePreference: /** @type {LanguagePreference} */ ("auto"),
     themePreference: /** @type {ThemePreference} */ (THEME.SYSTEM),
     systemDark: false,
+    musicEnabled: true,
+    musicVolume: 25,
     phases: PHASE,
     actions: ACTION,
     suits: SUIT,
@@ -93,6 +98,32 @@ document.addEventListener("alpine:init", () => {
     connectStarted: 0,
     generation: 0,
     lastTurnNotice: "",
+    /** @param {boolean} enabled @returns {void} */
+    setMusic(enabled) {
+      this.musicEnabled = enabled;
+      try {
+        localStorage.setItem("bataq.music", enabled ? "on" : "off");
+      } catch {}
+      this.updateMusic();
+    },
+    /** @param {number} volume @returns {void} */
+    setMusicVolume(volume) {
+      this.musicVolume = Math.max(0, Math.min(100, Number(volume) || 0));
+      try {
+        localStorage.setItem("bataq.musicVolume", String(this.musicVolume));
+      } catch {}
+      gameMusic?.setVolume(this.musicVolume / 100);
+    },
+    /** @returns {void} */
+    updateMusic() {
+      if (!this.musicEnabled || document.hidden) {
+        gameMusic?.pause();
+        return;
+      }
+      if (!gameMusic) gameMusic = new GenerativeMusic();
+      gameMusic.setVolume(this.musicVolume / 100);
+      gameMusic.start();
+    },
     /** @returns {void} */
     unlockTurnAudio() {
       try {
@@ -297,7 +328,10 @@ document.addEventListener("alpine:init", () => {
         document.addEventListener(
           eventName,
           (event) => {
-            if (event.isTrusted) this.unlockTurnAudio();
+            if (event.isTrusted) {
+              this.unlockTurnAudio();
+              this.updateMusic();
+            }
           },
           { capture: true },
         );
@@ -318,6 +352,12 @@ document.addEventListener("alpine:init", () => {
         if (preference === "en" || preference === "tr") this.languagePreference = preference;
       } catch {}
       this.updateDocumentLanguage();
+
+      try {
+        this.musicEnabled = localStorage.getItem("bataq.music") !== "off";
+        const volume = localStorage.getItem("bataq.musicVolume");
+        if (volume !== null && Number.isFinite(Number(volume))) this.musicVolume = Math.max(0, Math.min(100, Number(volume)));
+      } catch {}
 
       try {
         this.name = localStorage.getItem("bataq.name") || "";
@@ -343,11 +383,16 @@ document.addEventListener("alpine:init", () => {
         this.connection = CONNECTION.OFFLINE;
       });
       document.addEventListener("visibilitychange", () => {
+        this.updateMusic();
         if (!document.hidden) this.wake();
       });
+      window.addEventListener("pagehide", () => gameMusic?.pause());
       document.addEventListener("resume", () => this.wake());
       window.addEventListener("pageshow", (event) => {
-        if (event.persisted) this.wake();
+        if (event.persisted) {
+          this.updateMusic();
+          this.wake();
+        }
       });
       window.addEventListener("focus", () => {
         if (!this.ready || Date.now() - this.lastMessage > 15000) this.wake();

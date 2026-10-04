@@ -581,6 +581,13 @@
     margin-top: 6px;
     color: var(--muted);
   }
+  .setting-options .music-volume {
+    flex-wrap: wrap;
+  }
+  .setting-options .music-volume input {
+    width: 100%;
+    height: 24px;
+  }
   .setting-options p {
     margin-top: 15px;
   }

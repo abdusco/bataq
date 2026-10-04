@@ -21,8 +21,13 @@ async function verify() {
       });
       const Audio = window.AudioContext;
       window.AudioContext = class extends Audio {
+        constructor(...args) {
+          super(...args);
+          if (!window.turnAlertContext) window.turnAlertContext = this;
+          else window.musicContext = this;
+        }
         createOscillator() {
-          window.turnAlerts.notes++;
+          if (this === window.turnAlertContext) window.turnAlerts.notes++;
           return super.createOscillator();
         }
       };
@@ -36,6 +41,13 @@ async function verify() {
     assert.equal(await page.locator("html").getAttribute("data-theme"), "system");
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(245, 243, 235)");
     await page.getByRole("button", { name: "Open menu" }).click();
+    await page.waitForFunction(() => window.musicContext?.state === "running");
+    assert.equal(await page.getByRole("radio", { name: "Music on", exact: true }).isChecked(), true);
+    await page.getByRole("slider", { name: "Music volume" }).fill("40");
+    assert.equal(await page.evaluate(() => localStorage.getItem("bataq.musicVolume")), "40");
+    await page.getByRole("radio", { name: "Music off", exact: true }).check();
+    await page.waitForFunction(() => window.musicContext?.state === "suspended");
+    assert.equal(await page.evaluate(() => localStorage.getItem("bataq.music")), "off");
     await page.getByRole("radio", { name: "Dark", exact: true }).check();
     assert.equal(await page.evaluate(() => localStorage.getItem("bataq.theme")), "dark");
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(16, 29, 26)");
@@ -44,6 +56,54 @@ async function verify() {
     await page.getByPlaceholder("Your name", { exact: true }).waitFor();
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
     await page.getByRole("button", { name: "Open menu" }).click();
+    assert.equal(await page.getByRole("radio", { name: "Music off", exact: true }).isChecked(), true);
+    assert.equal(await page.getByRole("slider", { name: "Music volume" }).inputValue(), "40");
+    await page.getByRole("radio", { name: "Music on", exact: true }).check();
+    await page.waitForFunction(() => window.musicContext?.state === "running");
+    // Simulate mobile background/foreground while retaining the page.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForFunction(() => window.musicContext.state === "suspended");
+    await page.evaluate(() => {
+      delete document.hidden;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForFunction(() => window.musicContext.state === "running");
+    // Render the actual synth offline: it must produce finite, audible samples
+    // with headroom, rather than only creating successfully connected nodes.
+    const renderedMusic = await page.evaluate(async () => {
+      const { GenerativeMusic, MUSIC_TEMPO } = await import("/music.js");
+      const context = new OfflineAudioContext(2, 44100 * 12, 44100);
+      const Audio = window.AudioContext;
+      const music = new GenerativeMusic();
+      try {
+        window.AudioContext = function () {
+          return context;
+        };
+        music.setup();
+      } finally {
+        window.AudioContext = Audio;
+      }
+      music.playing = true;
+      music.setVolume(0.25);
+      for (let beat = 0; beat < 16; beat++) music.scheduleBeat(0.06 + (beat * 60) / MUSIC_TEMPO);
+      const buffer = await context.startRendering();
+      let peak = 0;
+      let energy = 0;
+      let finite = true;
+      for (const sample of buffer.getChannelData(0)) {
+        finite &&= Number.isFinite(sample);
+        peak = Math.max(peak, Math.abs(sample));
+        energy += sample * sample;
+      }
+      return { peak, rms: Math.sqrt(energy / buffer.length), finite, voices: music.voices.size };
+    });
+    assert.equal(renderedMusic.finite, true);
+    assert.ok(renderedMusic.rms > 0.0005, `silent music: ${JSON.stringify(renderedMusic)}`);
+    assert.ok(renderedMusic.peak < 0.9, `music lacks headroom: ${JSON.stringify(renderedMusic)}`);
+    assert.equal(renderedMusic.voices, 0);
     await page.getByRole("radio", { name: "Light", exact: true }).check();
     await page.emulateMedia({ colorScheme: "dark" });
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(245, 243, 235)");
@@ -249,7 +309,7 @@ async function verify() {
     }
     assert.deepEqual(errors, []);
     console.log(
-      "Browser checks passed: gameplay, refresh, reconnect, mobile layout, language and theme preferences, OS theme changes, offline shell, expired sessions, and all suit colors.",
+      "Browser checks passed: gameplay, refresh, reconnect, mobile layout, preferences, generative music output and controls, background audio pause, offline shell, expired sessions, and all suit colors.",
     );
   } finally {
     await browser.close();

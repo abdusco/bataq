@@ -28,9 +28,7 @@
   </head>
   <body x-data="bataq">
     <header class="masthead" :inert="rulesOpen || shareOpen || settingsOpen">
-      <a class="brand" href="/"
-        ><span class="brand-mark">♠</span> bataq<span class="brand-dot">.</span></a
-      >
+      <a class="brand" href="/"><span class="brand-mark">♠</span> bataq<span class="brand-dot">.</span></a>
       <div class="header-right">
         <button class="text-button rules-button" @click="rulesOpen = true">
           <span x-text="t('How to play')">How to play</span>
@@ -378,6 +376,21 @@
             <span lang="tr">Türkçe</span>
           </label>
           <p class="small muted" x-text="t('Saved on this device.')"></p>
+        </fieldset>
+        <fieldset class="setting-options">
+          <legend x-text="t('Game music')"></legend>
+          <label :class="{'selected-option': !musicEnabled}">
+            <input type="radio" name="music" value="off" :checked="!musicEnabled" @change="setMusic(false)" />
+            <span x-text="t('Music off')"></span>
+          </label>
+          <label :class="{'selected-option': musicEnabled}">
+            <input type="radio" name="music" value="on" :checked="musicEnabled" @change="setMusic(true)" :aria-label="t('Music on')" />
+            <span><strong x-text="t('Music on')"></strong><small x-text="t('Warm keys, a playful bass line, and soft brushes.')"></small></span>
+          </label>
+          <label class="music-volume">
+            <span x-text="t('Music volume')"></span>
+            <input type="range" min="0" max="100" :value="musicVolume" @input="setMusicVolume($el.value)" :aria-label="t('Music volume')" />
+          </label>
         </fieldset>
         <div class="drawer-links">
           <button class="outline wide" @click="settingsOpen = false; rulesOpen = true" x-text="t('How to play')"></button>
