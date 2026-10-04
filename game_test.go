@@ -2,8 +2,56 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestAddBots(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		humans int
+	}{
+		{"one human", 1},
+		{"two humans", 2},
+		{"three humans", 3},
+		{"full table", 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &Room{Phase: PhaseLobby}
+			for i := 0; i < tt.humans; i++ {
+				r.Players = append(r.Players, &Player{Name: "Human"})
+			}
+			if err := r.Apply(0, Move{Kind: ActionAddBots}); err != nil {
+				t.Fatal(err)
+			}
+			if len(r.Players) != PlayerCount {
+				t.Fatalf("got %d players, want %d", len(r.Players), PlayerCount)
+			}
+			seen := map[string]bool{}
+			for i, p := range r.Players {
+				if i < tt.humans {
+					if p.Bot || p.Name != "Human" {
+						t.Fatal("human player changed")
+					}
+					continue
+				}
+				if !p.Bot || !p.Online || p.ID == "" || !strings.HasSuffix(p.Name, " · bot") {
+					t.Fatalf("invalid bot: %+v", p)
+				}
+				if seen[p.Name] {
+					t.Fatalf("duplicate bot name: %s", p.Name)
+				}
+				seen[p.Name] = true
+			}
+			if err := r.Apply(0, Move{Kind: ActionAddBots}); err != nil {
+				t.Fatal(err)
+			}
+			if len(r.Players) != PlayerCount {
+				t.Fatal("adding bots twice changed a full table")
+			}
+		})
+	}
+}
 
 func TestLegalCards(t *testing.T) {
 	for _, tt := range []struct {

@@ -192,11 +192,21 @@ func (r *Room) Apply(seat int, move Move) error {
 		if seat != r.Host || r.Phase != PhaseLobby {
 			return errors.New("Only the host can add bots in the lobby")
 		}
-		names := []string{"Ada", "Deniz", "Efe"}
+		names := []string{
+			"Ada", "Arda", "Aslı", "Aylin", "Barış", "Bora", "Cem", "Ceren",
+			"Defne", "Deniz", "Derya", "Ece", "Efe", "Elif", "Emre", "Eren",
+			"İpek", "Kerem", "Mert", "Naz", "Selin", "Sibel", "Tuna", "Zeynep",
+		}
 		for len(r.Players) < PlayerCount {
-			p, _ := NewPlayer(randomID(16), names[len(r.Players)-1]+" · bot")
+			index, err := rand.Int(rand.Reader, big.NewInt(int64(len(names))))
+			if err != nil {
+				return err
+			}
+			i := int(index.Int64())
+			p, _ := NewPlayer(randomID(16), names[i]+" · bot")
 			p.Bot, p.Online = true, true
 			r.Players = append(r.Players, p)
+			names = append(names[:i], names[i+1:]...)
 		}
 	case ActionStart:
 		if seat != r.Host || r.Phase != PhaseLobby || len(r.Players) != PlayerCount {
