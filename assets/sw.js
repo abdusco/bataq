@@ -1,4 +1,4 @@
-const CACHE = "bataq-shell-v16";
+const CACHE = "bataq-shell-v17";
 const SHELL = [
   "/",
   "/style.css",
@@ -8,6 +8,8 @@ const SHELL = [
   "/vendor/alpine.min.js",
   "/vendor/qrcode.js",
   "/icon.svg",
+  "/icon-maskable.svg",
+  "/icon-maskable-1024.png",
   "/icon-192.png",
   "/icon-512.png",
   "/manifest.webmanifest",
