@@ -121,6 +121,9 @@
           <div class="table-panel">
             <div class="table-topline">
               <span x-text="room?.phase === phases.LOBBY ? t('Waiting for players') : t('ROUND {round} / 5', {round:room?.round})"></span>
+              <span class="trump-chip" x-show="room?.trump >= 0">
+                <strong x-text="trumpLabel"></strong><small x-text="room?.broken ? t(' · open') : t(' · closed')"></small>
+              </span>
             </div>
             <div class="table" :class="{'lobby-table': room?.phase === phases.LOBBY}">
               <template x-for="position in [0,1,2,3]" :key="position"
@@ -169,7 +172,6 @@
             <div class="turn-strip" aria-live="polite">
               <span class="turn-spark" :class="{'your-turn': myTurn}">✳</span>
               <div><strong x-text="statusTitle"></strong><small x-text="statusDetail"></small></div>
-              <span class="trump-chip" x-show="room?.trump >= 0" x-text="trumpLabel + (room?.broken ? t(' · open') : t(' · closed'))"></span>
             </div>
           </div>
           <aside class="side-panel">

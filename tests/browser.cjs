@@ -187,6 +187,36 @@ async function verify() {
     await page.getByRole("button", { name: "Deal the cards" }).click();
     await friend.waitForFunction(() => Alpine.$data(document.body).myTurn);
     await friend.locator(".scores").waitFor({ state: "visible" });
+    for (const width of [320, 390, 720]) {
+      await friend.setViewportSize({ width, height: 844 });
+      await friend.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const layout = await friend.evaluate(() => {
+        const bid = document.querySelector(".bid-control").closest(".panel-card").getBoundingClientRect();
+        const hand = document.querySelector(".hand-panel").getBoundingClientRect();
+        const table = document.querySelector(".table-panel").getBoundingClientRect();
+        const scores = document.querySelector(".scores").getBoundingClientRect();
+        return {
+          bidTop: bid.top,
+          bidBottom: bid.bottom,
+          handTop: hand.top,
+          handBottom: hand.bottom,
+          tableBottom: table.bottom,
+          scoresBottom: scores.bottom,
+          sticky: getComputedStyle(document.querySelector(".hand-panel")).position,
+          bottom: getComputedStyle(document.querySelector(".hand-panel")).bottom,
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      });
+      assert.ok(layout.handTop >= layout.bidBottom, `hand overlaps bid at ${width}px`);
+      assert.ok(layout.bidTop >= layout.tableBottom, `bid before table at ${width}px`);
+      assert.ok(layout.scoresBottom <= layout.handTop, `hand covers scores at ${width}px`);
+      assert.equal(layout.sticky, "sticky");
+      assert.equal(parseFloat(layout.bottom), width * 0.05);
+      assert.equal(layout.overflow, false);
+      await friend.locator(".hand-panel").scrollIntoViewIfNeeded();
+      assert.ok(await friend.locator(".hand-panel").evaluate((element) => element.getBoundingClientRect().bottom <= innerHeight));
+    }
+    await friend.setViewportSize({ width: 390, height: 844 });
     await friend.locator(".bid-range").fill("13");
     await friend.getByRole("button", { name: /^Bid 13 tricks/ }).click();
     await friend.waitForFunction(() => Alpine.$data(document.body).room.phase === "trump");
@@ -223,6 +253,14 @@ async function verify() {
       await friend.locator(".trump-chip").waitFor({ state: "visible" });
       await friend.locator(".scores").waitFor({ state: "visible" });
       await friend.locator(".last-trick").waitFor({ state: "visible" });
+      assert.equal(await friend.locator(".table-topline .trump-chip strong").textContent(), "♥ Hearts");
+      const topline = await friend.locator(".table-topline").evaluate((element) => {
+        const round = element.firstElementChild.getBoundingClientRect();
+        const trump = element.querySelector(".trump-chip").getBoundingClientRect();
+        return { round, trump };
+      });
+      assert.ok(topline.trump.left > topline.round.left);
+      assert.ok(topline.round.top < topline.trump.bottom && topline.trump.top < topline.round.bottom);
       assert.equal(await friend.locator(".score-row").count(), 4);
       assert.equal(await friend.locator(".mini-trick > div").count(), 4);
       assert.equal(await friend.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `overflow at ${width}px`);

@@ -1,4 +1,4 @@
-const CACHE = "bataq-shell-v17";
+const CACHE = "bataq-shell-v21";
 const SHELL = [
   "/",
   "/style.css",

@@ -342,7 +342,10 @@
   }
   .table-topline {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 14px;
     padding: 22px 26px;
     font-size: 12px;
     letter-spacing: 0.14em;
@@ -774,13 +777,20 @@
     animation: spin 16s linear infinite;
   }
   .trump-chip {
-    margin-left: auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 15px;
+    letter-spacing: normal;
+    color: #eef2dc;
+    background: #d6e9a51a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
+  .trump-chip small {
     font-size: 11px;
     color: #bdd5a3;
-    border: 1px solid #759b6940;
-    border-radius: 20px;
-    padding: 6px 10px;
-    white-space: nowrap;
   }
   .qr-box {
     width: 128px;
@@ -1325,11 +1335,6 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .trump-chip {
-    grid-column: 2;
-    justify-self: start;
-    margin-left: 0;
-  }
 }
 @media (max-width: 720px) {
   .header-right .rules-button {
@@ -1350,19 +1355,21 @@
     order: -3;
   }
   .hand-panel {
-    order: -1;
+    order: 3;
   }
   .side-panel {
-    order: 0;
+    display: contents;
   }
-  .auction-phase .side-panel {
+  .auction-phase .side-panel > .panel-card:has(.bid-control),
+  .auction-phase .trump-picker {
     order: -2;
   }
   .results {
     order: 1;
   }
   .panel-card:has(.bid-control) .pass-button {
-    grid-column: 1/-1;
+    grid-column: 2;
+    grid-row: 5;
   }
   .masthead {
     padding: 19px 5%;
@@ -1421,7 +1428,7 @@
     padding: 25px;
   }
   .room-heading {
-    margin-bottom: 22px;
+    margin-bottom: 0;
     align-items: end;
   }
   .room-heading .outline {
@@ -1462,14 +1469,14 @@
   }
   .panel-card:has(.bid-control) {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px 20px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px 12px;
     align-items: center;
   }
   .panel-card:has(.bid-control) .eyebrow,
   .panel-card:has(.bid-control) h2,
   .panel-card:has(.bid-control) p {
-    grid-column: 1;
+    grid-column: 1/-1;
   }
   .panel-card:has(.bid-control) h2 {
     margin: 5px 0;
@@ -1477,32 +1484,46 @@
   }
   .panel-card:has(.bid-control) p {
     font-size: 12px;
+    margin: 4px 0 10px;
+    line-height: 1.5;
   }
   .bid-control {
-    grid-column: 2;
-    grid-row: 1/4;
+    grid-column: 1;
+    grid-row: 4;
     margin: 0;
-    gap: 10px;
+    gap: 6px;
   }
   .bid-control span {
-    font-size: 50px;
-    min-width: 44px;
+    font-size: 40px;
+    min-width: 32px;
   }
   .bid-range {
-    grid-column: 1/-1;
-    margin-top: 8px;
+    grid-column: 2;
+    grid-row: 4;
+    margin: 0;
+    min-width: 0;
   }
   .panel-card:has(.bid-control) .primary {
-    grid-column: 1/-1;
+    grid-column: 1;
+    grid-row: 5;
+  }
+  .panel-card:has(.bid-control) .primary,
+  .panel-card:has(.bid-control) .pass-button {
+    padding: 12px 8px;
+    font-size: 12px;
   }
   .hand-panel {
-    padding: 19px 14px 24px;
-    margin-top: 16px;
+    position: sticky;
+    bottom: 5vw;
+    z-index: 10;
+    padding: 14px;
+    margin-top: calc(5vw - 16px);
+    box-shadow: 0 -8px 30px #193b3520;
   }
   .hand-heading {
     flex-wrap: wrap;
-    margin-bottom: 21px;
-    gap: 7px;
+    margin-bottom: 12px;
+    gap: 4px;
   }
   .hand-heading .small {
     font-size: 12px;
